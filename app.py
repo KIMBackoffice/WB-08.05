@@ -144,7 +144,7 @@ with _hcol:
         "</span></div></div>"
         "<div class=\"kim-bar-right\">"
         f"<div class=\"kim-meta-date\">{_today}</div>"
-        f"<div class=\"kim-meta-contact\">UNDER CONSTRUCTION &nbsp;&middot;&nbsp; {_today} &nbsp;&middot;&nbsp; kim.backoffice1@gmail.com</div>"
+        f"<div class=\"kim-meta-contact\">kim.backoffice1@gmail.com</div>"
         "</div></div>",
         unsafe_allow_html=True,
     )
