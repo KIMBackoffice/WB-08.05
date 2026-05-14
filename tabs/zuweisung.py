@@ -787,12 +787,14 @@ def _render_mittwoch_topic(idx, month, mittwoch_df, cur_topic, cur_resp, orig_to
     sel_key       = f"zuw_{month}_{idx}_tsel_{person_slug}"
 
     if not person_topics:
-        has_topic = cur_topic and cur_topic not in ("Mittwochscurriculum", "—", "")
+        _PREFIX = "Mittwochscurriculum: "
+        _bare_topic = cur_topic[len(_PREFIX):].strip() if cur_topic and cur_topic.startswith(_PREFIX) else (cur_topic or "")
+        has_topic = bool(_bare_topic) and _bare_topic not in ("Mittwochscurriculum", "—", "")
         if has_topic:
             st.markdown(
                 f"<div style='padding:8px 12px;background:#f7f8fa;border-radius:8px;"
                 f"font-size:13px;color:#aaa;border:1px solid #e2e6ea;font-style:italic'>"
-                f"{cur_topic}</div>",
+                f"{_bare_topic}</div>",
                 unsafe_allow_html=True,
             )
             return cur_topic
