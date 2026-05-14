@@ -555,17 +555,19 @@ def _render_person_editor(sc, confirm_month):
         cl, cr = st.columns([1, 2])
         with cr:
             if is_jc:
-                alts1, nmap1 = _format_alt_opts(_build_row_alternatives(row, slot_idx=0), orig_p1)
+                # Storage order: "aa / intermediate" -> parts[0]=aa, parts[1]=oa
+                # key "_0" -> cps[0] -> aa position; key "_1" -> cps[1] -> oa position
+                alts1, nmap1 = _format_alt_opts(_build_row_alternatives(row, slot_idx=1), orig_p1)
                 opts1 = [orig_p1] + [o for o in alts1 if nmap1.get(o, o) != orig_p1] + [_OTHER_LABEL]
-                st.markdown("<span style='font-size:10px;color:var(--muted)'>OA / Intermediate</span>", unsafe_allow_html=True)
-                st.selectbox("OA", opts1, index=0, label_visibility="collapsed", key=f"sel_{confirm_month}_{idx}_0")
+                st.markdown("<span style='font-size:10px;color:var(--muted)'>AA</span>", unsafe_allow_html=True)
+                st.selectbox("AA", opts1, index=0, label_visibility="collapsed", key=f"sel_{confirm_month}_{idx}_0")
                 if st.session_state.get(f"sel_{confirm_month}_{idx}_0") == _OTHER_LABEL:
                     st.text_input("Name", key=f"free_{confirm_month}_{idx}_0", placeholder="V. Nachname", label_visibility="collapsed")
 
-                alts2, nmap2 = _format_alt_opts(_build_row_alternatives(row, slot_idx=1), orig_p2)
+                alts2, nmap2 = _format_alt_opts(_build_row_alternatives(row, slot_idx=0), orig_p2)
                 opts2 = [orig_p2] + [o for o in alts2 if nmap2.get(o, o) != orig_p2] + [_OTHER_LABEL]
-                st.markdown("<span style='font-size:10px;color:var(--muted)'>AA</span>", unsafe_allow_html=True)
-                st.selectbox("AA", opts2, index=0, label_visibility="collapsed", key=f"sel_{confirm_month}_{idx}_1")
+                st.markdown("<span style='font-size:10px;color:var(--muted)'>OA / Intermediate</span>", unsafe_allow_html=True)
+                st.selectbox("OA", opts2, index=0, label_visibility="collapsed", key=f"sel_{confirm_month}_{idx}_1")
                 if st.session_state.get(f"sel_{confirm_month}_{idx}_1") == _OTHER_LABEL:
                     st.text_input("Name", key=f"free_{confirm_month}_{idx}_1", placeholder="V. Nachname", label_visibility="collapsed")
 
@@ -606,8 +608,9 @@ def _render_person_editor(sc, confirm_month):
             parts2 = [p.strip() for p in orig2.split("/")]
             op1    = parts2[0] if len(parts2) > 0 else "— TBD —"
             op2    = parts2[1] if len(parts2) > 1 else "— TBD —"
-            _, nm1b = _format_alt_opts(_build_row_alternatives(row2, slot_idx=0), op1)
-            _, nm2b = _format_alt_opts(_build_row_alternatives(row2, slot_idx=1), op2)
+            # Storage: "aa / intermediate" -> op1=aa uses slot_idx=1(AA pool), op2=oa uses slot_idx=0(OA pool)
+            _, nm1b = _format_alt_opts(_build_row_alternatives(row2, slot_idx=1), op1)
+            _, nm2b = _format_alt_opts(_build_row_alternatives(row2, slot_idx=0), op2)
             v1 = _resolve_sel(f"sel_{confirm_month}_{idx2}_0", nm1b, op1)
             v2 = _resolve_sel(f"sel_{confirm_month}_{idx2}_1", nm2b, op2)
             if v1 != op1:
