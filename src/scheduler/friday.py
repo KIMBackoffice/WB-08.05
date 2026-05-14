@@ -75,7 +75,7 @@ def build_friday_schedule(calendar_df, pep_df, selector):
         # COMBINE RESPONSIBLE
         # -------------------------
         responsible = " / ".join(
-            [x for x in [intermediate, aa] if x]  # OA/Int. first, then AA
+            [x for x in [aa, intermediate] if x]  # request for word/plan aa/oa, change in zuweisugung insted
         ) or None
 
         # -------------------------
