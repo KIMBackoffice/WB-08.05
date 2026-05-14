@@ -11,6 +11,15 @@ from src.selector import pick_person_fair
 from src.utils_names import extract_lastname as _extract_lastname
 
 
+def _normalize_name_key(s: str) -> str:
+    """Normalize German umlauts so sheet names (Luginbuehl) match
+    PEP names (Luginbühl) and vice versa. Always lowercase."""
+    s = str(s).lower().strip()
+    return (s
+            .replace('ü', 'ue').replace('ö', 'oe').replace('ä', 'ae').replace('ß', 'ss')
+            .replace('Ü', 'ue').replace('Ö', 'oe').replace('Ä', 'ae'))
+
+
 def build_wednesday_schedule(calendar_df, pep_df, topics_df, selector):
     """
     Mittwoch Curriculum — every Wednesday, 14:30–15:15
@@ -84,7 +93,7 @@ def get_topics_for_person(person_display_name: str, topics_df) -> list[str]:
         return []
 
     topic_map = _build_topic_map(topics_df)
-    lastname  = _extract_lastname(str(person_display_name).lower())
+    lastname  = _normalize_name_key(_extract_lastname(str(person_display_name).lower()))
     entries   = topic_map.get(lastname, [])
 
     # Sort most-overdue first so the dropdown default matches the algorithm
@@ -160,10 +169,10 @@ def _build_topic_map(topics_df):
         parts     = person_raw.strip().split()
         if len(parts) >= 2:
             firstname = parts[0]
-            lastname  = parts[-1].lower()
+            lastname  = _normalize_name_key(parts[-1])
         else:
             firstname = ""
-            lastname  = person_raw.lower()
+            lastname  = _normalize_name_key(person_raw)
 
         if not lastname:
             continue
@@ -192,7 +201,7 @@ def _pick_topic_for_person(responsible, topic_map, date):
     if not responsible or not topic_map:
         return "Mittwochscurriculum"
 
-    lastname = _extract_lastname(str(responsible).lower())
+    lastname = _normalize_name_key(_extract_lastname(str(responsible).lower()))
     topics   = topic_map.get(lastname)
 
     if not topics:
