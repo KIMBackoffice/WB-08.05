@@ -221,6 +221,20 @@ def render():
 
     sec("Zuweisung — Personen & Themen", first=True)
 
+    # ── Beta disclaimer ──────────────────────────────────────────────────
+    st.markdown(
+        "<div style='background:#fff3cd;border:1px solid #ffc107;border-radius:8px;"
+        "padding:10px 16px;margin-bottom:14px;font-size:12.5px;line-height:1.7;color:#856404'>"
+        "<strong>⚠️ Vorschau-Modus:</strong> Diese Ansicht dient nur zur Überprüfung und "
+        "Vorbereitung. Änderungen hier wirken sich <strong>nicht</strong> direkt auf den Plan aus — "
+        "sie sind nur in dieser Sitzung sichtbar. Für dauerhafte Änderungen bitte das "
+        "<a href='https://docs.google.com/spreadsheets/d/1nQEeGdvLfFtGscvujc48Qk3pwYP3JpC6lCHfgbMlkt8/edit?gid=0#gid=0' "
+        "target='_blank' style='color:#856404;font-weight:600'>Override-Sheet ↗</a> verwenden. "
+        "Einige Funktionen befinden sich noch in Entwicklung."
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
     # ── Header info block ────────────────────────────────────────────────
     st.markdown(
         f"<div style='background:#f8fafb;border:1px solid #dde3ea;border-radius:8px;"
