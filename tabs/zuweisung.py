@@ -488,13 +488,17 @@ def _render_row_jc(idx, row, month, edits, pep_norm):
     with col_icon:
         st.markdown("<div style='padding-top:6px'>👤</div>", unsafe_allow_html=True)
     with col_lbl1:
-        st.markdown("<div style='padding-top:8px;font-size:11px;color:#999'>OA / Int.</div>", unsafe_allow_html=True)
-    with col_p1:
-        res1 = _person_selectbox(idx, 0, row, month, edits, pep_norm, orig_p1, cur_p1, "p0")
-    with col_lbl2:
         st.markdown("<div style='padding-top:8px;font-size:11px;color:#999'>AA</div>", unsafe_allow_html=True)
+    with col_p1:
+        # parts[0] = AA (friday.py stores "aa / intermediate")
+        # slot 1 = AA in EVENT_DUTY_RULES["Journal_Club"]
+        res1 = _person_selectbox(idx, 1, row, month, edits, pep_norm, orig_p1, cur_p1, "p0")
+    with col_lbl2:
+        st.markdown("<div style='padding-top:8px;font-size:11px;color:#999'>OA / Int.</div>", unsafe_allow_html=True)
     with col_p2:
-        res2 = _person_selectbox(idx, 1, row, month, edits, pep_norm, orig_p2, cur_p2, "p1")
+        # parts[1] = OA/Int (friday.py stores "aa / intermediate")
+        # slot 0 = INTERMEDIATE in EVENT_DUTY_RULES["Journal_Club"]
+        res2 = _person_selectbox(idx, 0, row, month, edits, pep_norm, orig_p2, cur_p2, "p1")
 
     combined = f"{res1} / {res2}"
     staged   = edits.setdefault(idx, {})
