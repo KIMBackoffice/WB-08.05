@@ -60,6 +60,7 @@ import tabs.analyse          as tab_analyse
 import tabs.bestaetigung     as tab_best
 import tabs.benachrichtigung as tab_ben
 import tabs.zuweisung        as tab_zuw
+import tabs.zuweisung_b      as tab_zuw_b
 
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -305,13 +306,14 @@ if st.session_state.pop(SK.AUTOLOAD, False):
 
 
 # ── Tab dispatch ──────────────────────────────────────────────────────────────
-# ORDER v1.1: Plan → Kontrolle und Abschluss → Emails & Kalender → Fairness → Manuelle Zuweisung
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+# ORDER v1.2: Plan → Kontrolle und Abschluss → Emails & Kalender → Fairness → Manuelle Zuweisung → Manuelle Zuweisung B
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "Plan",
     "Kontrolle und Abschluss",
     "Emails & Kalender",
     "Fairness",
     "Manuelle Zuweisung",
+    "Manuelle Zuweisung B",
 ])
 
 with tab1:
@@ -328,6 +330,9 @@ with tab4:
 
 with tab5:
     tab_zuw.render()
+
+with tab6:
+    tab_zuw_b.render()
 
 # ── Footer ───────────────────────────────────────────────────────────────────
 st.markdown("<div style='height:180px'></div>", unsafe_allow_html=True)
