@@ -160,7 +160,6 @@ def load_all_data():
         ("physio",            load_physio,               "PHYSIO_URL"),
         ("imc",               load_imc_updates,          "IMC_URL"),
         ("teaching",          load_teaching_tuesday,     "TEACHING_URL"),
-        ("mittwoch",          load_mittwoch,             "MITTWOCH_URL"),
         ("mittwoch_topics",   load_sheet,                "MITTWOCH_TOPICS_URL"),
         ("bedside",           load_bedside,              "BEDSIDE_URL"),
         ("trauma",            load_trauma_board,         "TRAUMA_URL"),
@@ -313,7 +312,7 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "Emails & Kalender",
     "Fairness",
     "Manuelle Zuweisung",
-    "Manuelle Zuweisung B",
+    "Personen Zuweisung überprüfen",
 ])
 
 with tab1:
