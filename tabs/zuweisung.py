@@ -221,33 +221,31 @@ def render():
 
     sec("Zuweisung — Personen & Themen", first=True)
 
-    # ── Manual overrides link ─────────────────────────────────────────────
+    # ── Header info block ────────────────────────────────────────────────
     st.markdown(
-        f"<div style='background:#f0f7ff;border:1px solid #c8dff7;border-radius:8px;"
-        f"padding:10px 14px;margin-bottom:14px;font-size:13px'>"
-        f"📋 <strong>Manuelle Overrides</strong> direkt im Google Sheet bearbeiten: "
-        f"<a href='{_OVERRIDES_SHEET_URL}' target='_blank' "
-        f"style='color:#1a6e50;font-weight:600'>Manual Overrides Sheet ↗</a>"
-        f"<span style='color:#888;margin-left:10px;font-size:11px'>"
-        f"(Veranstaltung, Person, Thema — Änderungen werden beim nächsten Laden übernommen)</span>"
+        f"<div style='background:#f8fafb;border:1px solid #dde3ea;border-radius:8px;"
+        f"padding:12px 16px;margin-bottom:12px;font-size:12.5px;line-height:1.8'>"
+        f"<div style='margin-bottom:4px'>"
+        f"📋 <strong>Manuelle Overrides:</strong>&nbsp;"
+        f"<a href='{_OVERRIDES_SHEET_URL}' target='_blank' style='color:#1a6e50;font-weight:600'>Override-Sheet ↗</a>"
+        f"<span style='color:#aaa;margin-left:8px;font-size:11px'>(Änderungen werden beim nächsten Laden übernommen)</span>"
+        f"</div>"
+        f"<div style='color:var(--muted)'>"
+        f"Themen: "
+        f"<a href='https://docs.google.com/spreadsheets/d/1c6Mrpr8vF82FJ2ADhLRKd_7mRm4C6fV3GSRm0Cu3Pag/edit' "
+        f"target='_blank' style='color:var(--teal)'>Mittwochscurriculum ↗</a>"
+        f"&nbsp;·&nbsp;"
+        f"<a href='https://docs.google.com/spreadsheets/d/1BGFhC6YaW8mvXd-CL2Yl2apeLC-IATEbQ4ZGywteebI/edit?gid=0#gid=0' "
+        f"target='_blank' style='color:var(--teal)'>Physio-Talk ↗</a>"
+        f"&nbsp;·&nbsp;"
+        f"<span style='color:#aaa;font-size:11px'>Sheet-basierte Events (Teaching Tuesday, TTE usw.) bitte direkt im Google Sheet anpassen.</span>"
+        f"</div>"
+        f"<div style='margin-top:6px;padding-top:6px;border-top:1px solid #eaecef;font-size:11.5px;color:#888'>"
+        f"ℹ️ Dieses Tool ist ein administrativer Support und kann vereinzelt Ungenauigkeiten enthalten. "
+        f"Bitte alle Einteilungen vor Versand prüfen. Bei Problemen hilft oft ein Neu-Laden der Seite. "
+        f"Bei Fragen: <a href='mailto:kim.backoffice1@gmail.com' style='color:#888'>kim.backoffice1@gmail.com</a>"
+        f"</div>"
         f"</div>",
-        unsafe_allow_html=True,
-    )
-
-    st.caption(
-        "Alle zugewiesenen Veranstaltungen. "
-        "Sheet-basierte Events (Teaching Tuesday, TTE Curriculum usw.) bitte direkt im Google Sheet anpassen."
-    )
-    st.markdown(
-        "<div style='font-size:12px;color:var(--muted);margin:-4px 0 10px'>"
-        "Neue Themen für das <strong>Mittwochscurriculum</strong>: "
-        "<a href='https://docs.google.com/spreadsheets/d/1c6Mrpr8vF82FJ2ADhLRKd_7mRm4C6fV3GSRm0Cu3Pag/edit' "
-        "target='_blank' style='color:var(--teal)'>Mittwochs_Curriculum_Themen_Planung ↗</a>"
-        "&nbsp;&nbsp;·&nbsp;&nbsp;"
-        "Neue Themen für den <strong>Physio-Talk</strong>: "
-        "<a href='https://docs.google.com/spreadsheets/d/1BGFhC6YaW8mvXd-CL2Yl2apeLC-IATEbQ4ZGywteebI/edit?gid=0#gid=0' "
-        "target='_blank' style='color:var(--teal)'>Physio_Talk_Themen_Planung ↗</a>"
-        "</div>",
         unsafe_allow_html=True,
     )
 
@@ -854,8 +852,26 @@ def _person_selectbox(idx, slot: int, row, month, edits,
     opts = [o for o in opts if not (o in seen or seen.add(o))]
 
     stored = st.session_state.get(sel_key)
+    # If stored is a resolved name (not a raw option label), find it in opts via name_map
+    if stored is not None and stored not in opts:
+        # e.g. stored = "Prio I: S. Reidt (...)" from a previous pick -> resolve to "S. Reidt"
+        resolved = name_map.get(stored)
+        # also check: stored might BE the resolved name already (e.g. "S. Reidt")
+        if resolved is None:
+            # try finding opts entry whose name_map value == stored
+            resolved = next((name_map[o] for o in opts if name_map.get(o) == stored), None)
+        if resolved and resolved in opts:
+            stored = resolved
+        elif resolved:
+            # resolved name is in name_map as a value but key form differs; find key
+            stored = next((o for o in opts if name_map.get(o) == resolved), None)
     idx_sel = opts.index(stored) if stored in opts else 0
 
     st.selectbox("Person", opts, index=idx_sel,
                  label_visibility="collapsed", key=sel_key)
-    return name_map.get(st.session_state[sel_key], cur_name)
+    chosen = st.session_state[sel_key]
+    resolved_name = name_map.get(chosen, cur_name)
+    # Normalise sel_key to the plain name so next rerun finds it in opts without "Prio I:" prefix
+    if chosen != resolved_name and resolved_name in opts:
+        st.session_state[sel_key] = resolved_name
+    return resolved_name
