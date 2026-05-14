@@ -241,13 +241,21 @@ def render():
         f"<span style='color:#aaa;font-size:11px'>Sheet-basierte Events (Teaching Tuesday, TTE usw.) bitte direkt im Google Sheet anpassen.</span>"
         f"</div>"
         f"<div style='margin-top:6px;padding-top:6px;border-top:1px solid #eaecef;font-size:11.5px;color:#888'>"
-        f"ℹ️ Dieses Tool ist ein administrativer Support und kann vereinzelt Ungenauigkeiten enthalten. "
-        f"Bitte alle Einteilungen vor Versand prüfen. Bei Problemen hilft oft ein Neu-Laden der Seite. "
+        f"ℹ️ Dieses Tool ist aktuell im TEST und kann vereinzelt Ungenauigkeiten enthalten. "
+        f"Bitte alle Einteilungen vor Versand prüfen. Bei Problemen hilft oft nochmals auf einen gleichen Namen clicken oder ein Neu-Laden der Seite. "
         f"Bei Fragen: <a href='mailto:kim.backoffice1@gmail.com' style='color:#888'>kim.backoffice1@gmail.com</a>"
         f"</div>"
         f"</div>",
         unsafe_allow_html=True,
     )
+
+    # ── Reload all sheets button ──────────────────────────────────────────
+    _rl_col, _ = st.columns([2, 5])
+    with _rl_col:
+        if st.button("↺ Alle Sheets neu laden", key="zuw_reload_sheets",
+                     help="Lädt alle Google Sheets neu (z.B. nach Änderungen im Mittwochs-Curriculum-Sheet)"):
+            st.session_state["_trigger_autoload"] = True
+            st.rerun()
 
     # ── Month selector ─────────────────────────────────────────────────────
     current_month = datetime.date.today().month
