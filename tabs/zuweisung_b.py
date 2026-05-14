@@ -137,56 +137,99 @@ def _tier_label(priority_tier: int, role: str, duty_label: str) -> str:
 # ROW BUILDERS  — return list of candidate dicts for one event
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _build_candidates_standard(row, pep_norm, mittwoch_df) -> dict:
+def _build_candidates_standard(row, pep_norm, mittwoch_df) -> list[dict]:
     """
-    Returns a single candidate dict for the planned person only.
-    B-view shows one row per event — just confirm or skip.
+    Returns a list of candidate dicts:
+      {status, name, topic, role, duty_label, priority_tier}
+    The first entry is always the algorithm's primary assignment.
     """
-    evt_type  = str(row.get("event_type", ""))
-    resp_raw  = str(row.get("responsible", "") or "— TBD —")
+    evt_type = str(row.get("event_type", ""))
+    resp_raw = str(row.get("responsible", "") or "— TBD —")
     topic_raw = str(row.get("topic", "") or "")
 
-    fixed_topic   = _FIXED_TOPIC_LABEL.get(evt_type)
+    # Fixed topic label for non-topic events
+    fixed_topic = _FIXED_TOPIC_LABEL.get(evt_type)
     topic_display = fixed_topic if fixed_topic else topic_raw
 
-    # For Mittwoch_Curriculum strip the "Mittwochscurriculum: " prefix for display
-    _PREFIX = "Mittwochscurriculum: "
-    if topic_display.startswith(_PREFIX):
-        topic_display = topic_display[len(_PREFIX):]
+    candidates = []
 
-    # Determine status label from responsible string (may contain "Prio X:" prefix)
-    status = "Geplant"
-    name   = _dn(resp_raw)
-    if resp_raw.startswith("Prio"):
-        # e.g. "Prio III: A. Ostini (OA_II, Tagdienst OA (119))"
-        # extract just the display name part
-        import re
-        m = re.match(r"(Prio\s+[IVX]+)[:\s]+(.*?)(?:\s*\(.*)?$", resp_raw)
-        if m:
-            status = m.group(1)
-            name   = _dn(m.group(2).strip())
+    # ── Primary assignment (Planned) ──────────────────────────────────────
+    # For Mittwoch_Curriculum, try to get all topics for the person
+    if evt_type == "Mittwoch_Curriculum" and mittwoch_df is not None:
+        person_topics = get_topics_for_person(resp_raw, mittwoch_df)
+        if person_topics:
+            for t in person_topics:
+                candidates.append({
+                    "status":        "Geplant",
+                    "name":          _dn(resp_raw),
+                    "topic":         t,
+                    "role":          "",
+                    "duty_label":    "",
+                    "priority_tier": 0,
+                })
+        else:
+            candidates.append({
+                "status":        "Geplant",
+                "name":          _dn(resp_raw),
+                "topic":         topic_display or "⚠️ Kein Thema",
+                "role":          "",
+                "duty_label":    "",
+                "priority_tier": 0,
+            })
+    else:
+        candidates.append({
+            "status":        "Geplant",
+            "name":          _dn(resp_raw),
+            "topic":         topic_display,
+            "role":          "",
+            "duty_label":    "",
+            "priority_tier": 0,
+        })
 
-    return {
-        "status": status,
-        "name":   name,
-        "topic":  topic_display,
-    }
+    # ── Alternatives (from PEP) ───────────────────────────────────────────
+    alts = _get_alts(row, 0, pep_norm)
+    for alt in alts:
+        candidates.append({
+            "status":        _tier_label(alt["priority_tier"], alt["role"], alt["duty_label"]),
+            "name":          _dn(alt["name"]),
+            "topic":         topic_display,
+            "role":          alt.get("role", ""),
+            "duty_label":    alt.get("duty_label", ""),
+            "priority_tier": alt["priority_tier"],
+        })
+
+    return candidates
 
 
-def _build_candidates_jc(row, pep_norm) -> tuple[dict, dict]:
+def _build_candidates_jc(row, pep_norm) -> tuple[list[dict], list[dict]]:
     """
-    Returns (aa, oa) — one planned person each.
-    B-view shows exactly one checkbox per role.
+    Returns (aa_candidates, oa_candidates).
+    Each is a list of {status, name} dicts.
+    Topic is always 'Journal Club'.
     """
-    resp_raw = str(row.get("responsible", "") or "")
-    parts    = [p.strip() for p in resp_raw.split("/")]
-    orig_aa  = parts[0] if parts else "— TBD —"
-    orig_oa  = parts[1] if len(parts) > 1 else "— TBD —"
+    resp_raw  = str(row.get("responsible", "") or "")
+    parts     = [p.strip() for p in resp_raw.split("/")]
+    orig_aa   = parts[0] if parts else "— TBD —"
+    orig_oa   = parts[1] if len(parts) > 1 else "— TBD —"
 
-    return (
-        {"status": "Geplant", "name": _dn(orig_aa)},
-        {"status": "Geplant", "name": _dn(orig_oa)},
-    )
+    aa_cands = [{"status": "Geplant", "name": _dn(orig_aa), "priority_tier": 0}]
+    oa_cands = [{"status": "Geplant", "name": _dn(orig_oa), "priority_tier": 0}]
+
+    # slot 1 = AA, slot 0 = OA/Int in EVENT_DUTY_RULES["Journal_Club"]
+    for alt in _get_alts(row, 1, pep_norm):
+        aa_cands.append({
+            "status":        _tier_label(alt["priority_tier"], alt["role"], alt["duty_label"]),
+            "name":          _dn(alt["name"]),
+            "priority_tier": alt["priority_tier"],
+        })
+    for alt in _get_alts(row, 0, pep_norm):
+        oa_cands.append({
+            "status":        _tier_label(alt["priority_tier"], alt["role"], alt["duty_label"]),
+            "name":          _dn(alt["name"]),
+            "priority_tier": alt["priority_tier"],
+        })
+
+    return aa_cands, oa_cands
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -201,74 +244,105 @@ def _render_standard_event(idx, row, month, pep_norm, mittwoch_df, confirmed: li
     evt_type = str(row.get("event_type", ""))
     _event_header(row, evt_type)
 
-    cand     = _build_candidates_standard(row, pep_norm, mittwoch_df)
+    candidates = _build_candidates_standard(row, pep_norm, mittwoch_df)
+
     wd       = WEEKDAY_DE.get(row["date"].strftime("%A"), "")
     date_str = f"{wd} {row['date'].strftime('%d.%m.')}"
     time_str = str(row.get("time", "") or "")
     evt_lbl  = _EVT_LABEL.get(evt_type, evt_type)
-    date_iso = row["date"].strftime("%d.%m.%Y")
 
-    col_name, col_topic, col_cb = st.columns([3, 4.5, 0.6])
-    col_name.markdown(
-        f"<div style='padding:6px 4px;font-size:13px;font-weight:500'>{cand['name']}</div>",
-        unsafe_allow_html=True,
-    )
-    col_topic.markdown(
-        f"<div style='padding:6px 4px;font-size:12px;color:#555'>{cand['topic']}</div>",
-        unsafe_allow_html=True,
-    )
-    key     = _cb_key(month, idx, "std", 0)
-    checked = col_cb.checkbox("", key=key, label_visibility="collapsed")
-    if checked:
-        confirmed.append({
-            "year":        PLAN_YEAR,
-            "month":       month,
-            "event_date":  date_iso,
-            "event_type":  evt_type,
-            "responsible": cand["name"],
-            "topic":       cand["topic"],
-            "edited_by":   "",
-            "edited_at":   pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"),
-            "comments":    "",
-        })
+    # Header row
+    hcols = st.columns([2.5, 2.5, 3.5, 0.6])
+    hcols[0].markdown("<div style='font-size:10px;color:#999;font-weight:600'>Status / Priorität</div>", unsafe_allow_html=True)
+    hcols[1].markdown("<div style='font-size:10px;color:#999;font-weight:600'>Name</div>", unsafe_allow_html=True)
+    hcols[2].markdown("<div style='font-size:10px;color:#999;font-weight:600'>Thema</div>", unsafe_allow_html=True)
+    hcols[3].markdown("<div style='font-size:10px;color:#999;font-weight:600'>✓</div>", unsafe_allow_html=True)
+
+    for i, cand in enumerate(candidates):
+        key = _cb_key(month, idx, "std", i)
+        cols = st.columns([2.5, 2.5, 3.5, 0.6])
+
+        # Status pill colour
+        tier = cand["priority_tier"]
+        pill_bg = {0: "#e8f5e9", 1: "#e3f2fd", 2: "#fff8e1", 3: "#fce4ec"}.get(tier, "#f5f5f5")
+        pill_fg = {0: "#2e7d32", 1: "#1565c0", 2: "#b07800", 3: "#c62828"}.get(tier, "#555")
+
+        cols[0].markdown(
+            f"<div style='padding:4px 8px;background:{pill_bg};color:{pill_fg};"
+            f"border-radius:6px;font-size:11px;font-weight:500;line-height:1.4'>"
+            f"{cand['status']}</div>",
+            unsafe_allow_html=True,
+        )
+        cols[1].markdown(
+            f"<div style='padding:6px 4px;font-size:12.5px'>{cand['name']}</div>",
+            unsafe_allow_html=True,
+        )
+        cols[2].markdown(
+            f"<div style='padding:6px 4px;font-size:12px;color:#555'>{cand['topic']}</div>",
+            unsafe_allow_html=True,
+        )
+        checked = cols[3].checkbox("", key=key, label_visibility="collapsed")
+        if checked:
+            confirmed.append({
+                "Datum":       f"{date_str} {time_str}".strip(),
+                "Veranstaltung": evt_lbl,
+                "Status":      cand["status"],
+                "Name":        cand["name"],
+                "Thema":       cand["topic"],
+                "Rolle":       "",
+            })
 
     st.markdown("<div style='margin-bottom:4px'></div>", unsafe_allow_html=True)
 
 
 def _render_jc_event(idx, row, month, pep_norm, confirmed: list):
     _event_header(row, _JC_EVENT)
-    aa, oa   = _build_candidates_jc(row, pep_norm)
-    wd       = WEEKDAY_DE.get(row["date"].strftime("%A"), "")
-    date_iso = row["date"].strftime("%d.%m.%Y")
+    aa_cands, oa_cands = _build_candidates_jc(row, pep_norm)
 
-    # Two rows: AA and OA/Int — one checkbox each, both independent
-    for role_label, cand, role_prefix in [
-        ("AA", aa, "aa"),
-        ("OA / Int.", oa, "oa"),
+    wd       = WEEKDAY_DE.get(row["date"].strftime("%A"), "")
+    date_str = f"{wd} {row['date'].strftime('%d.%m.')}"
+    time_str = str(row.get("time", "") or "")
+
+    for role_label, cands, role_prefix in [
+        ("AA", aa_cands, "aa"),
+        ("OA / Int.", oa_cands, "oa"),
     ]:
-        col_role, col_name, col_cb = st.columns([1.5, 5.5, 0.6])
-        col_role.markdown(
-            f"<div style='padding:6px 4px;font-size:11px;color:#999;font-weight:600'>{role_label}</div>",
+        st.markdown(
+            f"<div style='font-size:11px;color:#999;font-weight:600;"
+            f"margin:6px 0 2px'>{role_label}</div>",
             unsafe_allow_html=True,
         )
-        col_name.markdown(
-            f"<div style='padding:6px 4px;font-size:13px;font-weight:500'>{cand['name']}</div>",
-            unsafe_allow_html=True,
-        )
-        key     = _cb_key(month, idx, role_prefix, 0)
-        checked = col_cb.checkbox("", key=key, label_visibility="collapsed")
-        if checked:
-            confirmed.append({
-                "year":        PLAN_YEAR,
-                "month":       month,
-                "event_date":  date_iso,
-                "event_type":  "Journal_Club",
-                "responsible": f"{aa['name']} / {oa['name']}" if role_label == "AA" else f"{aa['name']} / {oa['name']}",
-                "topic":       "Journal Club",
-                "edited_by":   "",
-                "edited_at":   pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"),
-                "comments":    f"Rolle: {role_label} — {cand['name']}",
-            })
+        # mini header
+        hcols = st.columns([2.5, 3.5, 0.6])
+        hcols[0].markdown("<div style='font-size:10px;color:#bbb'>Status</div>", unsafe_allow_html=True)
+        hcols[1].markdown("<div style='font-size:10px;color:#bbb'>Name</div>", unsafe_allow_html=True)
+        hcols[2].markdown("<div style='font-size:10px;color:#bbb'>✓</div>", unsafe_allow_html=True)
+
+        for i, cand in enumerate(cands):
+            key = _cb_key(month, idx, role_prefix, i)
+            cols = st.columns([2.5, 3.5, 0.6])
+            tier = cand["priority_tier"]
+            pill_bg = {0: "#e8f5e9", 1: "#e3f2fd", 2: "#fff8e1", 3: "#fce4ec"}.get(tier, "#f5f5f5")
+            pill_fg = {0: "#2e7d32", 1: "#1565c0", 2: "#b07800", 3: "#c62828"}.get(tier, "#555")
+            cols[0].markdown(
+                f"<div style='padding:4px 8px;background:{pill_bg};color:{pill_fg};"
+                f"border-radius:6px;font-size:11px;font-weight:500'>{cand['status']}</div>",
+                unsafe_allow_html=True,
+            )
+            cols[1].markdown(
+                f"<div style='padding:6px 4px;font-size:12.5px'>{cand['name']}</div>",
+                unsafe_allow_html=True,
+            )
+            checked = cols[2].checkbox("", key=key, label_visibility="collapsed")
+            if checked:
+                confirmed.append({
+                    "Datum":         f"{date_str} {time_str}".strip(),
+                    "Veranstaltung": "Journal Club",
+                    "Status":        cand["status"],
+                    "Name":          cand["name"],
+                    "Thema":         "Journal Club",
+                    "Rolle":         role_label,
+                })
 
     st.markdown("<div style='margin-bottom:4px'></div>", unsafe_allow_html=True)
 
@@ -287,30 +361,17 @@ def _render_confirmed_table(confirmed: list):
         )
         return
 
-    sec("Bestätigte Einträge — Override-Sheet Format")
+    sec("Bestätigte Einträge")
     st.markdown(
         "<div style='font-size:12px;color:#777;margin-bottom:8px'>"
-        "Tabelle anklicken → Ctrl+A → Ctrl+C, dann ins "
-        "<a href='https://docs.google.com/spreadsheets/d/1nQEeGdvLfFtGscvujc48Qk3pwYP3JpC6lCHfgbMlkt8/edit?gid=0#gid=0' "
-        "target='_blank' style='color:#1a6e50;font-weight:600'>Override-Sheet ↗</a> einfügen.</div>",
+        "Tabelle anklicken → Ctrl+A → Ctrl+C zum Kopieren.</div>",
         unsafe_allow_html=True,
     )
-    col_order = ["year", "month", "event_date", "event_type", "responsible", "topic", "edited_by", "edited_at", "comments"]
     df = pd.DataFrame(confirmed)
+    # Reorder columns for clarity
+    col_order = ["Datum", "Veranstaltung", "Rolle", "Status", "Name", "Thema"]
     df = df[[c for c in col_order if c in df.columns]]
-    st.dataframe(df, use_container_width=True, hide_index=True,
-        column_config={
-            "year":        st.column_config.NumberColumn("year",       width="small"),
-            "month":       st.column_config.NumberColumn("month",      width="small"),
-            "event_date":  st.column_config.TextColumn("event_date",   width="small"),
-            "event_type":  st.column_config.TextColumn("event_type",   width="medium"),
-            "responsible": st.column_config.TextColumn("responsible",  width="medium"),
-            "topic":       st.column_config.TextColumn("topic",        width="large"),
-            "edited_by":   st.column_config.TextColumn("edited_by",    width="small"),
-            "edited_at":   st.column_config.TextColumn("edited_at",    width="small"),
-            "comments":    st.column_config.TextColumn("comments",     width="medium"),
-        }
-    )
+    st.dataframe(df, use_container_width=True, hide_index=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
