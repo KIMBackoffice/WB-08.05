@@ -350,7 +350,9 @@ def render():
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
     # ── Render rows ────────────────────────────────────────────────────────
-    mittwoch_df      = st.session_state.get("data", {}).get("mittwoch_topics")
+    # mittwoch_topics = separate topics sheet; falls back to "mittwoch" if not loaded
+    _data_d = st.session_state.get("data", {})
+    mittwoch_df = _data_d.get("mittwoch_topics") or _data_d.get("mittwoch")
     physio_topics_df = st.session_state.get("data", {}).get("physio_topics")
     physio_used:set  = set()   # tracks claimed articles within this render pass
 
@@ -421,14 +423,7 @@ def _render_override_copybox(sc_rel: pd.DataFrame, edits: dict, month: int):
             unsafe_allow_html=True,
         )
 
-        name_col, _ = st.columns([2, 3])
-        with name_col:
-            edited_by = st.text_input(
-                "Dein Name (für edited_by Spalte)",
-                placeholder="z.B. S. Deckarm",
-                key=f"override_edited_by_{month}",
-                label_visibility="visible",
-            )
+        edited_by = ""  # filled manually in the sheet
 
         # Preview table matches exact sheet columns (including comments column)
         preview = pd.DataFrame([{
@@ -671,12 +666,14 @@ def _render_type_selector(idx, month, orig_type: str, cur_type: str, edits: dict
             staged.pop("event_type", None)
         else:
             staged["event_type"] = chosen_type
-        # Clear stale topic widgets for this row
+        # Clear stale topic + person widgets so they re-seed for new event type
         for wk in list(st.session_state.keys()):
             if (f"zuw_{month}_{idx}_physio_sel" in wk or
-                    f"zuw_{month}_{idx}_tsel" in wk):
+                    f"zuw_{month}_{idx}_tsel" in wk or
+                    f"zuw_{month}_{idx}_p" == wk):
                 del st.session_state[wk]
         staged.pop("topic", None)
+        staged.pop("responsible", None)
         if not staged:
             edits.pop(idx, None)
         st.rerun()
