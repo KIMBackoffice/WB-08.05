@@ -358,16 +358,24 @@ def render():
     # ── Render rows ────────────────────────────────────────────────────────
     # mittwoch_topics = separate topics sheet; falls back to "mittwoch" if not loaded
     _data_d = st.session_state.get("data", {})
-    mittwoch_df = _data_d.get("mittwoch_topics") or _data_d.get("mittwoch")
+    # Can't use `or` with DataFrames (raises ValueError) — check explicitly
+    _mt = _data_d.get("mittwoch_topics")
+    mittwoch_df = _mt if (_mt is not None and not getattr(_mt, "empty", True)) else _data_d.get("mittwoch")
     physio_topics_df = st.session_state.get("data", {}).get("physio_topics")
     physio_used:set  = set()   # tracks claimed articles within this render pass
 
     for idx, row in sc_rel.iterrows():
         if str(row.get("event_type", "")) == _JC_EVENT:
-            _render_row_jc(idx, row, month, edits, pep_norm)
+            _date_tag = pd.Timestamp(row["date"]).strftime("%Y%m%d")
+            _evt_tag  = str(row.get("event_type", ""))[:8]
+            _stable   = f"{_date_tag}_{_evt_tag}"
+            _render_row_jc(_stable, row, month, edits, pep_norm)
         else:
+            _date_tag = pd.Timestamp(row["date"]).strftime("%Y%m%d")
+            _evt_tag  = str(row.get("event_type", ""))[:8]
+            _stable   = f"{_date_tag}_{_evt_tag}"
             _render_row_standard(
-                idx, row, month, edits, pep_norm,
+                _stable, row, month, edits, pep_norm,
                 mittwoch_df, physio_topics_df, physio_used,
             )
 
@@ -567,7 +575,7 @@ def _render_row_standard(idx, row, month, edits, pep_norm,
         staged["responsible"] = res_person
         # clear stale topic widget so it re-seeds for the new person
         for wk in list(st.session_state.keys()):
-            if f"zuw_{month}_{idx}_physio_sel" in wk or f"zuw_{month}_{idx}_tsel" in wk:
+            if f"zuw_{month}_{idx}" in wk:
                 del st.session_state[wk]
         staged.pop("topic", None)
     elif "responsible" in staged:
@@ -674,9 +682,7 @@ def _render_type_selector(idx, month, orig_type: str, cur_type: str, edits: dict
             staged["event_type"] = chosen_type
         # Clear stale topic + person widgets so they re-seed for new event type
         for wk in list(st.session_state.keys()):
-            if (f"zuw_{month}_{idx}_physio_sel" in wk or
-                    f"zuw_{month}_{idx}_tsel" in wk or
-                    f"zuw_{month}_{idx}_p" == wk):
+            if f"zuw_{month}_{idx}" in wk:
                 del st.session_state[wk]
         staged.pop("topic", None)
         staged.pop("responsible", None)
@@ -784,7 +790,7 @@ def _render_physio_topic(idx, month, physio_topics_df, orig_topic, cur_topic,
 def _render_mittwoch_topic(idx, month, mittwoch_df, cur_topic, cur_resp, orig_topic) -> str:
     person_topics = get_topics_for_person(cur_resp, mittwoch_df) if mittwoch_df is not None else []
     person_slug   = cur_resp.replace(" ", "_").replace(".", "").replace("-", "").lower()[:20]
-    sel_key       = f"zuw_{month}_{idx}_tsel_{person_slug}"
+    sel_key       = f"zuw_{month}_{idx}_tsel_{person_slug}"  # idx is stable here (date-based from caller)
 
     if not person_topics:
         _PREFIX = "Mittwochscurriculum: "
