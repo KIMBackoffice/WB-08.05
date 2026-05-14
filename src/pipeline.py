@@ -291,7 +291,7 @@ def generate_full_schedule(year, month, data):
 
     therapy   = ensure_schema(schedule_therapy(calendar))
     tuesday   = ensure_schema(build_tuesday_schedule(calendar, get_df("physio"), pep_df, selector, physio_topics_df=get_df("physio_topics"), already_picked_physio_nrs=set()))
-    wednesday = ensure_schema(build_wednesday_schedule(calendar, pep_df, get_df("mittwoch"), selector))
+    wednesday = ensure_schema(build_wednesday_schedule(calendar, pep_df, get_df("mittwoch_topics"), selector))
     friday    = ensure_schema(build_friday_schedule(calendar, pep_df, selector))
 
     full = pd.concat(
@@ -395,7 +395,7 @@ def generate_full_schedule_aware(year, month, data):
 
         # Algorithm events — shared selector carries memory month-to-month
         tuesday   = ensure_schema(build_tuesday_schedule(calendar, get_df("physio"), pep_df_raw, selector, physio_topics_df=get_df("physio_topics"), already_picked_physio_nrs=_physio_picked))
-        wednesday = ensure_schema(build_wednesday_schedule(calendar, pep_df_raw, get_df("mittwoch"), selector))
+        wednesday = ensure_schema(build_wednesday_schedule(calendar, pep_df_raw, get_df("mittwoch_topics"), selector))
         friday    = ensure_schema(build_friday_schedule(calendar, pep_df_raw, selector))
 
         full = pd.concat(
