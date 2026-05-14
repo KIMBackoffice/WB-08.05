@@ -479,7 +479,8 @@ def render():
 
     pep_norm    = _ensure_pep_norm(month)
     _data_d     = st.session_state.get("data", {})
-    mittwoch_df = _data_d.get("mittwoch_topics") or _data_d.get("mittwoch")
+    _mt = _data_d.get("mittwoch_topics")
+    mittwoch_df = _mt if (_mt is not None and not getattr(_mt, "empty", True)) else _data_d.get("mittwoch")
 
     # ── Render all events + collect confirmed ─────────────────────────────
     confirmed: list = []
