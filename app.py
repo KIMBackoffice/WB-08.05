@@ -160,6 +160,7 @@ def load_all_data():
         ("imc",               load_imc_updates,          "IMC_URL"),
         ("teaching",          load_teaching_tuesday,     "TEACHING_URL"),
         ("mittwoch",          load_mittwoch,             "MITTWOCH_URL"),
+        ("mittwoch_topics",   load_sheet,                "MITTWOCH_TOPICS_URL"),
         ("bedside",           load_bedside,              "BEDSIDE_URL"),
         ("trauma",            load_trauma_board,         "TRAUMA_URL"),
         ("tte",               load_tte,                  "TTE_URL"),
