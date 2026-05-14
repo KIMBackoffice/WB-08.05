@@ -243,6 +243,10 @@ def render():
         "Neue Themen für das <strong>Mittwochscurriculum</strong>: "
         "<a href='https://docs.google.com/spreadsheets/d/1c6Mrpr8vF82FJ2ADhLRKd_7mRm4C6fV3GSRm0Cu3Pag/edit' "
         "target='_blank' style='color:var(--teal)'>Mittwochs_Curriculum_Themen_Planung ↗</a>"
+        "&nbsp;&nbsp;·&nbsp;&nbsp;"
+        "Neue Themen für den <strong>Physio-Talk</strong>: "
+        "<a href='https://docs.google.com/spreadsheets/d/1BGFhC6YaW8mvXd-CL2Yl2apeLC-IATEbQ4ZGywteebI/edit?gid=0#gid=0' "
+        "target='_blank' style='color:var(--teal)'>Physio_Talk_Themen_Planung ↗</a>"
         "</div>",
         unsafe_allow_html=True,
     )
@@ -287,7 +291,7 @@ def render():
     cache_key = f"zuw_schedule_{month}"
     if cache_key not in st.session_state:
         st.session_state.pop(f"zuw_edits_{month}", None)
-        data       = st.session_state["data"]
+        data       = state.get_data()
         pep_months = st.session_state.get("pep_months", set())
         sc_fresh   = (
             generate_full_schedule_aware(PLAN_YEAR, month, data)
@@ -296,9 +300,9 @@ def render():
         )
         if "overrides_df" not in st.session_state:
             try:
-                st.session_state["overrides_df"] = load_overrides(year=PLAN_YEAR)
+                state.set_overrides(load_overrides(year=PLAN_YEAR))
             except Exception:
-                st.session_state["overrides_df"] = None
+                state.set_overrides(None)
         ov_df = st.session_state.get("overrides_df")
         if ov_df is not None and not ov_df.empty:
             sc_fresh = apply_overrides(sc_fresh, ov_df, month)
@@ -346,7 +350,7 @@ def render():
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
     # ── Render rows ────────────────────────────────────────────────────────
-    mittwoch_df      = st.session_state.get("data", {}).get("mittwoch")
+    mittwoch_df      = st.session_state.get("data", {}).get("mittwoch_topics")
     physio_topics_df = st.session_state.get("data", {}).get("physio_topics")
     physio_used:set  = set()   # tracks claimed articles within this render pass
 
@@ -390,6 +394,11 @@ def _get_dirty_rows(sc_rel: pd.DataFrame, edits: dict) -> list:
 
 
 def _render_override_copybox(sc_rel: pd.DataFrame, edits: dict, month: int):
+    """
+    Show changed rows in a table matching the exact Override-Sheet column schema.
+    No automatic saving — user copies rows and pastes manually into the sheet.
+    Schema: year | month | event_date | event_type | responsible | topic | edited_by | edited_at | comments
+    """
     if not edits:
         return
     dirty = _get_dirty_rows(sc_rel, edits)
@@ -399,20 +408,29 @@ def _render_override_copybox(sc_rel: pd.DataFrame, edits: dict, month: int):
     n       = len(dirty)
     now_str = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M")
     st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
-    with st.expander(f"{n} Änderung(en) bereit zum Speichern", expanded=True):
+    with st.expander(f"{n} Änderung(en) — bitte manuell ins Override-Sheet übertragen", expanded=True):
+
+        st.markdown(
+            f"<div style='font-size:12.5px;color:#555;margin-bottom:10px;line-height:1.6'>"
+            f"Kopiere die Zeilen unten und füge sie ins "
+            f"<a href='{_OVERRIDES_SHEET_URL}' target='_blank' "
+            f"style='color:#1a6e50;font-weight:600'>Override-Sheet ↗</a> ein.<br>"
+            f"<span style='font-size:11px;color:#999'>"
+            f"Spaltenreihenfolge: year · month · event_date · event_type · responsible · topic · edited_by · edited_at · comments</span>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
 
         name_col, _ = st.columns([2, 3])
         with name_col:
             edited_by = st.text_input(
-                "Dein Name",
+                "Dein Name (für edited_by Spalte)",
                 placeholder="z.B. S. Deckarm",
                 key=f"override_edited_by_{month}",
-                label_visibility="collapsed",
+                label_visibility="visible",
             )
-        if not edited_by.strip():
-            st.caption("Bitte zuerst deinen Namen eingeben.")
 
-        # Preview matches the exact sheet columns
+        # Preview table matches exact sheet columns (including comments column)
         preview = pd.DataFrame([{
             "year":        PLAN_YEAR,
             "month":       month,
@@ -422,6 +440,7 @@ def _render_override_copybox(sc_rel: pd.DataFrame, edits: dict, month: int):
             "topic":       r["topic"],
             "edited_by":   edited_by.strip() or "—",
             "edited_at":   now_str,
+            "comments":    "",
         } for r in dirty])
         st.dataframe(preview, use_container_width=True, hide_index=True,
             column_config={
@@ -433,53 +452,17 @@ def _render_override_copybox(sc_rel: pd.DataFrame, edits: dict, month: int):
                 "topic":       st.column_config.TextColumn("topic",         width="large"),
                 "edited_by":   st.column_config.TextColumn("edited_by",     width="small"),
                 "edited_at":   st.column_config.TextColumn("edited_at",     width="small"),
+                "comments":    st.column_config.TextColumn("comments (werden nicht übernommen)", width="medium"),
             })
 
-        btn_col, link_col = st.columns([2, 3])
-        with btn_col:
-            save_clicked = st.button(
-                f"Ins Override-Sheet speichern ({n})",
-                type="primary",
-                use_container_width=True,
-                key=f"override_save_{month}",
-                disabled=not edited_by.strip(),
-            )
-        with link_col:
-            st.markdown(
-                f"<div style='padding-top:8px;font-size:12px;color:var(--muted)'>"
-                f"oder manuell im <a href='{_OVERRIDES_SHEET_URL}' target='_blank' "
-                f"style='color:#1a6e50;font-weight:600'>Override-Sheet</a>"
-                f"</div>",
-                unsafe_allow_html=True,
-            )
-
-        if save_clicked and edited_by.strip():
-            edits_to_save = {
-                r["_row_idx"]: {k: v for k, v in edits.get(r["_row_idx"], {}).items()
-                                if k in ("responsible", "topic", "event_type")}
-                for r in dirty
-            }
-            sc_full = st.session_state.get(f"zuw_schedule_{month}", sc_rel)
-            try:
-                with st.spinner("Wird gespeichert …"):
-                    save_overrides(
-                        year=PLAN_YEAR,
-                        month=month,
-                        edits=edits_to_save,
-                        schedule=sc_full,
-                        edited_by=edited_by.strip(),
-                    )
-                edits_key = f"zuw_edits_{month}"
-                st.session_state[edits_key] = {}
-                for wk in [k for k in st.session_state if f"zuw_{month}_" in str(k)]:
-                    del st.session_state[wk]
-                st.session_state.pop(f"zuw_schedule_{month}", None)
-                st.session_state.pop("overrides_df", None)
-                state.invalidate_month(month)
-                banner(f"{n} Änderung(en) dauerhaft gespeichert", "ok")
-                st.rerun()
-            except Exception as e:
-                banner(f"Fehler beim Speichern: {e}", "err")
+        st.markdown(
+            f"<div style='margin-top:8px;font-size:11.5px;color:#888'>"
+            f"💡 Tipp: Tabelle anklicken, dann Ctrl+A → Ctrl+C um alle Zeilen zu kopieren. "
+            f"Dann im <a href='{_OVERRIDES_SHEET_URL}' target='_blank' "
+            f"style='color:#1a6e50'>Override-Sheet</a> in die nächste freie Zeile einfügen."
+            f"</div>",
+            unsafe_allow_html=True,
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
