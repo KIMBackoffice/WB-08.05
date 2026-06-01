@@ -83,7 +83,10 @@ def ensure_schema(df):
 
     df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.normalize()
 
-    return df[required]
+    # Keep required columns first, then any extra columns (e.g. zielgruppe, zg_unknown)
+    # so downstream consumers like export_docx.py can read them.
+    extra = [c for c in df.columns if c not in required]
+    return df[required + extra]
 
 
 # =========================
