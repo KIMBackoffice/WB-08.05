@@ -712,7 +712,7 @@ def export_to_word(schedule_df, template_path, month_label):
                            event_type not in EVENT_ZIELGRUPPE and
                            event_type not in MERGED_LABEL_EVENTS)
         star_flag       = "★" in responsible or "★" in topic
-        zg_unknown      = bool(row.get("zg_unknown"))   # diverse: checkbox cols absent
+        zg_unknown      = row.get("zg_unknown") is True   # diverse: checkbox cols absent; NaN/None → False
         warn = no_audience or missing_person or missing_topic or unknown_type or star_flag or zg_unknown
 
         # Special events: merged cell instead of checkboxes
