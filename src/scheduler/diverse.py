@@ -1,4 +1,5 @@
 # src/scheduler/diverse.py
+import re
 import pandas as pd
 
 
@@ -31,7 +32,11 @@ def schedule_diverse(df):
         return pd.DataFrame()
 
     df = df.copy()
+    # Normalize column names: collapse all whitespace variants (non-breaking spaces,
+    # double spaces) to a single space. Matches what load_sheet does, but repeated
+    # here defensively in case df arrives from another path.
     df.columns = df.columns.str.lower().str.strip()
+    df.columns = df.columns.map(lambda c: re.sub(r'\s+', ' ', c))
 
     # detect which zielgruppe columns are actually present in this sheet
     ZIELGRUPPE_COLS = {
@@ -71,11 +76,10 @@ def schedule_diverse(df):
 
         # -------------------------
         # ZIELGRUPPE — per-row checkboxes
-        # Only fall back to ["A","P","S","PA"] when the columns
-        # are entirely absent from the sheet (not just all-FALSE).
-        # If columns exist but all are FALSE the row targets nobody —
-        # we still include it but with an empty zielgruppe so
-        # export_docx.py can handle it gracefully.
+        # If checkbox columns exist: read them exactly as set — [] means nobody.
+        # If columns are entirely absent (old sheet without checkbox headers):
+        # use [] and set col_missing=True so export_docx.py renders a red row.
+        # We never silently assign all audiences — unknown is better than wrong.
         # -------------------------
         if present_zg_cols:
             zielgruppe = [
@@ -83,10 +87,11 @@ def schedule_diverse(df):
                 for col, code in present_zg_cols.items()
                 if _parse_bool(row.get(col, False))
             ]
-            # all checkboxes FALSE but columns exist → keep [] (uncategorised)
+            col_missing = False
         else:
-            # sheet has no checkbox columns at all → show to everyone
-            zielgruppe = ["A", "P", "S", "PA"]
+            # Sheet has no checkbox columns — flag for admin review
+            zielgruppe  = []
+            col_missing = True
 
         events.append({
             "date":        date.normalize(),
@@ -95,7 +100,8 @@ def schedule_diverse(df):
             "responsible": row.get("veranwortlich (vorname nachname)"),
             "topic":       row.get("thema") or "Diverse Veranstaltungen",
             "room":        row.get("raum") or "",
-            "zielgruppe":  zielgruppe,   # per-row override for export_docx.py
+            "zielgruppe":  zielgruppe,    # per-row override for export_docx.py
+            "zg_unknown":  col_missing,   # True = checkbox columns missing → red row
         })
 
     return pd.DataFrame(events)
