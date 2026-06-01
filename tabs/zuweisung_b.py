@@ -54,9 +54,10 @@ _EVT_COLOR: dict[str, str] = {
 }
 
 _FIXED_TOPIC_LABEL: dict[str, str] = {
-    "COD_SENIOR": "n/a – Case of the Day (COD)",
-    "COD_JUNIOR": "n/a – Case of the Day (COD)",
-    "PEER":       "n/a – Peer-Teaching Session",
+    "COD_SENIOR":   "n/a – Case of the Day (COD)",
+    "COD_JUNIOR":   "n/a – Case of the Day (COD)",
+    "PEER":         "n/a – Peer-Teaching Session",
+    "Journal_Club": "n/a – Journal Club",
 }
 
 _OVERRIDES_SHEET_URL = (
@@ -154,8 +155,6 @@ def _build_candidates_standard(row, pep_norm, mittwoch_df) -> list[dict]:
     candidates = []
 
     # ── Primary assignment (Planned) ──────────────────────────────────────
-    # For Mittwoch_Curriculum, show ALL topics for the planned person so
-    # the admin can pick which one to use. Each topic gets its own row.
     if evt_type == "Mittwoch_Curriculum" and mittwoch_df is not None:
         person_topics = get_topics_for_person(resp_raw, mittwoch_df)
         if person_topics:
@@ -188,8 +187,6 @@ def _build_candidates_standard(row, pep_norm, mittwoch_df) -> list[dict]:
         })
 
     # ── Alternatives (from PEP) ───────────────────────────────────────────
-    # For Mittwoch, each alternative gets their OWN topics (all of them),
-    # one row per topic — so Nadja can see exactly what each person would present.
     alts = _get_alts(row, 0, pep_norm)
     for alt in alts:
         if evt_type == "Mittwoch_Curriculum" and mittwoch_df is not None:
@@ -214,7 +211,6 @@ def _build_candidates_jc(row, pep_norm) -> tuple[list[dict], list[dict]]:
     """
     Returns (aa_candidates, oa_candidates).
     Each is a list of {status, name} dicts.
-    Topic is always 'Journal Club'.
     """
     resp_raw  = str(row.get("responsible", "") or "")
     parts     = [p.strip() for p in resp_raw.split("/")]
@@ -224,7 +220,6 @@ def _build_candidates_jc(row, pep_norm) -> tuple[list[dict], list[dict]]:
     aa_cands = [{"status": "Geplant", "name": _dn(orig_aa), "priority_tier": 0}]
     oa_cands = [{"status": "Geplant", "name": _dn(orig_oa), "priority_tier": 0}]
 
-    # slot 1 = AA, slot 0 = OA/Int in EVENT_DUTY_RULES["Journal_Club"]
     for alt in _get_alts(row, 1, pep_norm):
         aa_cands.append({
             "status":        _tier_label(alt["priority_tier"], alt["role"], alt["duty_label"]),
@@ -260,7 +255,6 @@ def _render_standard_event(idx, row, month, pep_norm, mittwoch_df, confirmed: li
     time_str = str(row.get("time", "") or "")
     evt_lbl  = _EVT_LABEL.get(evt_type, evt_type)
 
-    # Header row
     hcols = st.columns([2.5, 2.5, 3.5, 0.6])
     hcols[0].markdown("<div style='font-size:10px;color:#999;font-weight:600'>Status / Priorität</div>", unsafe_allow_html=True)
     hcols[1].markdown("<div style='font-size:10px;color:#999;font-weight:600'>Name</div>", unsafe_allow_html=True)
@@ -270,12 +264,9 @@ def _render_standard_event(idx, row, month, pep_norm, mittwoch_df, confirmed: li
     for i, cand in enumerate(candidates):
         key = _cb_key(month, idx, "std", i)
         cols = st.columns([2.5, 2.5, 3.5, 0.6])
-
-        # Status pill colour
         tier = cand["priority_tier"]
         pill_bg = {0: "#e8f5e9", 1: "#e3f2fd", 2: "#fff8e1", 3: "#fce4ec"}.get(tier, "#f5f5f5")
         pill_fg = {0: "#2e7d32", 1: "#1565c0", 2: "#b07800", 3: "#c62828"}.get(tier, "#555")
-
         cols[0].markdown(
             f"<div style='padding:4px 8px;background:{pill_bg};color:{pill_fg};"
             f"border-radius:6px;font-size:11px;font-weight:500;line-height:1.4'>"
@@ -293,12 +284,12 @@ def _render_standard_event(idx, row, month, pep_norm, mittwoch_df, confirmed: li
         checked = cols[3].checkbox("", key=key, label_visibility="collapsed")
         if checked:
             confirmed.append({
-                "Datum":       f"{date_str} {time_str}".strip(),
+                "Datum":         f"{date_str} {time_str}".strip(),
                 "Veranstaltung": evt_lbl,
-                "Status":      cand["status"],
-                "Name":        cand["name"],
-                "Thema":       cand["topic"],
-                "Rolle":       "",
+                "Status":        cand["status"],
+                "Name":          cand["name"],
+                "Thema":         cand["topic"],
+                "Rolle":         "",
             })
 
     st.markdown("<div style='margin-bottom:4px'></div>", unsafe_allow_html=True)
@@ -321,15 +312,15 @@ def _render_jc_event(idx, row, month, pep_norm, confirmed: list):
             f"margin:6px 0 2px'>{role_label}</div>",
             unsafe_allow_html=True,
         )
-        # mini header
-        hcols = st.columns([2.5, 3.5, 0.6])
+        hcols = st.columns([2.5, 2.5, 3.5, 0.6])
         hcols[0].markdown("<div style='font-size:10px;color:#bbb'>Status</div>", unsafe_allow_html=True)
         hcols[1].markdown("<div style='font-size:10px;color:#bbb'>Name</div>", unsafe_allow_html=True)
-        hcols[2].markdown("<div style='font-size:10px;color:#bbb'>✓</div>", unsafe_allow_html=True)
+        hcols[2].markdown("<div style='font-size:10px;color:#bbb'>Thema</div>", unsafe_allow_html=True)
+        hcols[3].markdown("<div style='font-size:10px;color:#bbb'>✓</div>", unsafe_allow_html=True)
 
         for i, cand in enumerate(cands):
             key = _cb_key(month, idx, role_prefix, i)
-            cols = st.columns([2.5, 3.5, 0.6])
+            cols = st.columns([2.5, 2.5, 3.5, 0.6])
             tier = cand["priority_tier"]
             pill_bg = {0: "#e8f5e9", 1: "#e3f2fd", 2: "#fff8e1", 3: "#fce4ec"}.get(tier, "#f5f5f5")
             pill_fg = {0: "#2e7d32", 1: "#1565c0", 2: "#b07800", 3: "#c62828"}.get(tier, "#555")
@@ -342,7 +333,11 @@ def _render_jc_event(idx, row, month, pep_norm, confirmed: list):
                 f"<div style='padding:6px 4px;font-size:12.5px'>{cand['name']}</div>",
                 unsafe_allow_html=True,
             )
-            checked = cols[2].checkbox("", key=key, label_visibility="collapsed")
+            cols[2].markdown(
+                f"<div style='padding:6px 4px;font-size:12px;color:#888'>n/a – Journal Club</div>",
+                unsafe_allow_html=True,
+            )
+            checked = cols[3].checkbox("", key=key, label_visibility="collapsed")
             if checked:
                 confirmed.append({
                     "Datum":         f"{date_str} {time_str}".strip(),
@@ -383,7 +378,6 @@ def _render_confirmed_table(confirmed: list):
         unsafe_allow_html=True,
     )
     df = pd.DataFrame(confirmed)
-    # Reorder columns for clarity
     col_order = ["Datum", "Veranstaltung", "Rolle", "Status", "Name", "Thema"]
     df = df[[c for c in col_order if c in df.columns]]
     st.dataframe(df, use_container_width=True, hide_index=True)
@@ -394,7 +388,6 @@ def _render_confirmed_table(confirmed: list):
 # ═══════════════════════════════════════════════════════════════════════════
 
 def render():
-    # ── Access gate ───────────────────────────────────────────────────────
     gc, _ = st.columns([1, 2])
     with gc:
         zuw_b_pw = st.text_input(
@@ -423,7 +416,6 @@ def render():
 
     sec("Zuweisung B — Personen & Themen", first=True)
 
-    # ── Info block ────────────────────────────────────────────────────────
     st.markdown(
         f"<div style='background:#f8fafb;border:1px solid #dde3ea;border-radius:8px;"
         f"padding:12px 16px;margin-bottom:12px;font-size:12.5px;line-height:1.8'>"
@@ -451,7 +443,6 @@ def render():
         unsafe_allow_html=True,
     )
 
-    # ── Month selector ────────────────────────────────────────────────────
     current_month = datetime.date.today().month
     next_month    = min(current_month + 1, 12)
     future_months = [m for m in MONTH_LABELS.keys() if m >= current_month]
@@ -470,7 +461,6 @@ def render():
     banner("Vorschau — Checkboxen setzen zum Bestätigen.", "info")
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
-    # ── Load schedule (reuse from Zuweisung if available) ─────────────────
     cache_key = f"zuw_schedule_{month}"
     if cache_key not in st.session_state:
         data       = state.get_data()
@@ -491,7 +481,7 @@ def render():
         st.session_state[cache_key] = sc_fresh
 
     sc     = st.session_state[cache_key].copy()
-    sc_rel = sc[sc["event_type"].isin(RELEVANT_EVENTS)].copy()
+    sc_rel = sc[sc["event_type"].isin(RELEVANT_EVENTS)].copy().reset_index(drop=True)
 
     if sc_rel.empty:
         banner(f"Keine algorithmischen Veranstaltungen für {MONTH_LABELS[month]}.", "info")
@@ -502,7 +492,6 @@ def render():
     _mt = _data_d.get("mittwoch_topics")
     mittwoch_df = _mt if (_mt is not None and not getattr(_mt, "empty", True)) else _data_d.get("mittwoch")
 
-    # ── Render all events + collect confirmed ─────────────────────────────
     confirmed: list = []
 
     for idx, row in sc_rel.iterrows():
@@ -511,5 +500,4 @@ def render():
         else:
             _render_standard_event(idx, row, month, pep_norm, mittwoch_df, confirmed)
 
-    # ── Copy-out table ────────────────────────────────────────────────────
     _render_confirmed_table(confirmed)
