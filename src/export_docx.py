@@ -61,8 +61,31 @@ def _rand_hex8():
     return f"{random.randint(1, 0x7FFFFFFE):08X}"
 
 
+# Red used for admin warnings in the Word output (early-phase data issues)
+_WARN_COLOR = "FF0000"
+
+
+def _add_row_shading(trPr, color_hex):
+    """Add a light-red background shading to the <w:trPr> of a row."""
+    # Use a 20% tint of the colour as fill so text stays readable.
+    # We apply it via <w:shd> on the trPr.  Each <w:tc> also needs its own
+    # <w:shd> to actually render in Word — added in _build_data_row when warn=True.
+    shd = etree.SubElement(trPr, _tag("w", "shd"))
+    shd.set(_tag("w", "val"),   "clear")
+    shd.set(_tag("w", "color"), "auto")
+    shd.set(_tag("w", "fill"),  "FFD0D0")   # light red fill
+
+
+def _add_tc_shading(tcPr):
+    """Add the same light-red fill to a <w:tcPr> (required per-cell in Word)."""
+    shd = etree.SubElement(tcPr, _tag("w", "shd"))
+    shd.set(_tag("w", "val"),   "clear")
+    shd.set(_tag("w", "color"), "auto")
+    shd.set(_tag("w", "fill"),  "FFD0D0")
+
+
 def _make_run(text, font_theme=None, font_name=None, sz=18, bold=False,
-              centered=False, hint_east=False):
+              centered=False, hint_east=False, color=None):
     """
     Build a <w:p> containing a single <w:r> with the given text.
     Returns the <w:p> element.
@@ -81,6 +104,9 @@ def _make_run(text, font_theme=None, font_name=None, sz=18, bold=False,
 
     pPrRpr = etree.SubElement(pPr, _tag("w", "rPr"))
     _apply_rpr_fonts(pPrRpr, font_theme, font_name, sz, bold, hint_east)
+    if color:
+        c = etree.SubElement(pPrRpr, _tag("w", "color"))
+        c.set(_tag("w", "val"), color)
 
     if not text:
         return p
@@ -88,6 +114,9 @@ def _make_run(text, font_theme=None, font_name=None, sz=18, bold=False,
     r = etree.SubElement(p, _tag("w", "r"))
     rPr = etree.SubElement(r, _tag("w", "rPr"))
     _apply_rpr_fonts(rPr, font_theme, font_name, sz, bold, hint_east)
+    if color:
+        c2 = etree.SubElement(rPr, _tag("w", "color"))
+        c2.set(_tag("w", "val"), color)
 
     t = etree.SubElement(r, _tag("w", "t"))
     t.text = str(text)
@@ -122,7 +151,8 @@ def _apply_rpr_fonts(rPr, font_theme, font_name, sz, bold, hint_east):
 
 
 def _make_plain_tc(width_dxa, text, font_theme=None, font_name=None,
-                   sz=18, bold=False, centered=False, hint_east=False):
+                   sz=18, bold=False, centered=False, hint_east=False,
+                   color=None, warn_bg=False):
     """Build a <w:tc> with given width and a text paragraph inside."""
     tc = etree.Element(_tag("w", "tc"))
     tcPr = etree.SubElement(tc, _tag("w", "tcPr"))
@@ -131,6 +161,8 @@ def _make_plain_tc(width_dxa, text, font_theme=None, font_name=None,
     tcW.set(_tag("w", "type"), "dxa")
     vAlign = etree.SubElement(tcPr, _tag("w", "vAlign"))
     vAlign.set(_tag("w", "val"), "center")
+    if warn_bg:
+        _add_tc_shading(tcPr)
 
     tc.append(_make_run(
         text,
@@ -140,6 +172,7 @@ def _make_plain_tc(width_dxa, text, font_theme=None, font_name=None,
         bold=bold,
         centered=centered,
         hint_east=hint_east,
+        color=color,
     ))
     return tc
 
@@ -227,7 +260,7 @@ def _make_checkbox_sdt(checked: bool) -> etree._Element:
 # ------------------------------------------------------------------
 
 def _get_groups(event_type, zielgruppe_override=None):
-    if zielgruppe_override and isinstance(zielgruppe_override, list):
+    if zielgruppe_override is not None and isinstance(zielgruppe_override, list):
         return zielgruppe_override
     return EVENT_ZIELGRUPPE.get(event_type, [])
 
@@ -480,7 +513,7 @@ def _build_special_row(date_str, time_str, responsible, topic, room, merged_labe
 # ------------------------------------------------------------------
 
 def _build_data_row(date_str, time_str, responsible, topic, room,
-                    arzt, pflege, nds, pa):
+                    arzt, pflege, nds, pa, warn=False):
     """
     Returns a <w:tr> element styled to match the Vorlage data rows.
 
@@ -493,7 +526,11 @@ def _build_data_row(date_str, time_str, responsible, topic, room,
       5  Pflege (SDT)   1118
       6  NDS (SDT)      1118
       7  PA (SDT)       1118
+
+    warn=True: light-red row background + red text on Responsible/Thema
+    to signal the admin that this row has a data problem.
     """
+    warn_color = _WARN_COLOR if warn else None
     tr = etree.Element(_tag("w", "tr"))
     tr.set(_tag("w14", "paraId"), _rand_hex8())
     tr.set(_tag("w14", "textId"), _rand_hex8())
@@ -501,6 +538,8 @@ def _build_data_row(date_str, time_str, responsible, topic, room,
     trPr = etree.SubElement(tr, _tag("w", "trPr"))
     trH  = etree.SubElement(trPr, _tag("w", "trHeight"))
     trH.set(_tag("w", "val"), "532")
+    if warn:
+        _add_row_shading(trPr, _WARN_COLOR)
 
     # Col 0: Datum / Zeit — two lines, theme font, sz 18
     date_time_text = f"{date_str}\n{time_str}" if time_str else date_str
@@ -510,6 +549,8 @@ def _build_data_row(date_str, time_str, responsible, topic, room,
     tcW0  = etree.SubElement(tcPr0, _tag("w", "tcW"))
     tcW0.set(_tag("w", "w"), "1702"); tcW0.set(_tag("w", "type"), "dxa")
     vA0 = etree.SubElement(tcPr0, _tag("w", "vAlign")); vA0.set(_tag("w", "val"), "center")
+    if warn:
+        _add_tc_shading(tcPr0)
 
     p0 = etree.SubElement(tc0, _tag("w", "p"))
     p0.set(_tag("w14", "paraId"), _rand_hex8())
@@ -563,16 +604,18 @@ def _build_data_row(date_str, time_str, responsible, topic, room,
 
     tr.append(tc0)
 
-    # Col 1: Verantwortliche — theme font, sz 18
-    tr.append(_make_plain_tc(2201, responsible or "",
-                             font_theme="majorHAnsi", sz=18))
+    # Col 1: Verantwortliche — theme font, sz 18 (red if missing or warn)
+    tr.append(_make_plain_tc(2201, responsible or "???",
+                             font_theme="majorHAnsi", sz=18,
+                             color=warn_color, warn_bg=warn))
 
-    # Col 2: Thema — theme font, sz 18
-    tr.append(_make_plain_tc(4874, topic or "",
-                             font_theme="majorHAnsi", sz=18))
+    # Col 2: Thema — theme font, sz 18 (red if missing or warn)
+    tr.append(_make_plain_tc(4874, topic or "???",
+                             font_theme="majorHAnsi", sz=18,
+                             color=warn_color, warn_bg=warn))
 
     # Col 3: Ort — plain, sz 16
-    tr.append(_make_plain_tc(1535, room or "", sz=16))
+    tr.append(_make_plain_tc(1535, room or "", sz=16, warn_bg=warn))
 
     # Cols 4-7: SDT checkboxes
     tr.append(_make_checkbox_sdt(arzt))
@@ -655,6 +698,22 @@ def export_to_word(schedule_df, template_path, month_label):
         topic       = str(row.get("topic")       or "").strip()
         room        = str(row.get("room")        or "").strip()
 
+        # ----------------------------------------------------------
+        # Admin warning: flag rows that need attention.
+        # Triggers: no audience selected, missing responsible/topic,
+        # unknown event_type, or ★ marker from selector/wednesday fallback.
+        # Row gets a light-red background + red text so it's
+        # immediately visible when reviewing before publishing.
+        # ----------------------------------------------------------
+        no_audience     = (zg_override is not None and len(groups) == 0)
+        missing_person  = not responsible
+        missing_topic   = not topic
+        unknown_type    = (zg_override is None and
+                           event_type not in EVENT_ZIELGRUPPE and
+                           event_type not in MERGED_LABEL_EVENTS)
+        star_flag       = "★" in responsible or "★" in topic
+        warn = no_audience or missing_person or missing_topic or unknown_type or star_flag
+
         # Special events: merged cell instead of checkboxes
         merged_label = MERGED_LABEL_EVENTS.get(event_type)
         if merged_label:
@@ -665,6 +724,7 @@ def export_to_word(schedule_df, template_path, month_label):
             tr = _build_data_row(
                 date_str, time_str, responsible, topic, room,
                 arzt, pflege, nds, pa,
+                warn=warn,
             )
         tbl.append(tr)
 
