@@ -128,10 +128,12 @@ def parse_pep_xlsx(file_bytes: bytes, year: int, month: int) -> pd.DataFrame:
     Raises ValueError with a user-friendly message on bad input.
     """
     try:
-        raw = pd.read_excel(io.BytesIO(file_bytes), header=None)
+        raw = pd.read_excel(io.BytesIO(file_bytes), header=None, engine="openpyxl")
+    except ImportError:
+        raise ValueError("openpyxl ist nicht installiert. Bitte `openpyxl` zur requirements.txt hinzufügen.")
     except Exception as e:
         raise ValueError(f"Excel konnte nicht gelesen werden: {e}")
-
+ 
     day_header_row = _find_day_header_row(raw)
     day_row        = raw.iloc[day_header_row]
     day_columns    = {
@@ -139,7 +141,6 @@ def parse_pep_xlsx(file_bytes: bytes, year: int, month: int) -> pd.DataFrame:
         for col_idx, day in enumerate(day_row)
         if isinstance(day, (int, float)) and 1 <= day <= 31
     }
-
     current_role = None
     records      = []
 
