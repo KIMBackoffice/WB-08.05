@@ -154,7 +154,8 @@ def _build_candidates_standard(row, pep_norm, mittwoch_df) -> list[dict]:
     candidates = []
 
     # ── Primary assignment (Planned) ──────────────────────────────────────
-    # For Mittwoch_Curriculum, try to get all topics for the person
+    # For Mittwoch_Curriculum, show ALL topics for the planned person so
+    # the admin can pick which one to use. Each topic gets its own row.
     if evt_type == "Mittwoch_Curriculum" and mittwoch_df is not None:
         person_topics = get_topics_for_person(resp_raw, mittwoch_df)
         if person_topics:
@@ -187,16 +188,24 @@ def _build_candidates_standard(row, pep_norm, mittwoch_df) -> list[dict]:
         })
 
     # ── Alternatives (from PEP) ───────────────────────────────────────────
+    # For Mittwoch, each alternative gets their OWN topics (all of them),
+    # one row per topic — so Nadja can see exactly what each person would present.
     alts = _get_alts(row, 0, pep_norm)
     for alt in alts:
-        candidates.append({
-            "status":        _tier_label(alt["priority_tier"], alt["role"], alt["duty_label"]),
-            "name":          _dn(alt["name"]),
-            "topic":         topic_display,
-            "role":          alt.get("role", ""),
-            "duty_label":    alt.get("duty_label", ""),
-            "priority_tier": alt["priority_tier"],
-        })
+        if evt_type == "Mittwoch_Curriculum" and mittwoch_df is not None:
+            alt_topics = get_topics_for_person(alt["name"], mittwoch_df)
+            topic_list = [("Mittwochscurriculum: " + t) for t in alt_topics] if alt_topics else ["Mittwochscurriculum"]
+        else:
+            topic_list = [topic_display]
+        for alt_topic in topic_list:
+            candidates.append({
+                "status":        _tier_label(alt["priority_tier"], alt["role"], alt["duty_label"]),
+                "name":          _dn(alt["name"]),
+                "topic":         alt_topic,
+                "role":          alt.get("role", ""),
+                "duty_label":    alt.get("duty_label", ""),
+                "priority_tier": alt["priority_tier"],
+            })
 
     return candidates
 
@@ -363,8 +372,14 @@ def _render_confirmed_table(confirmed: list):
 
     sec("Bestätigte Einträge")
     st.markdown(
-        "<div style='font-size:12px;color:#777;margin-bottom:8px'>"
-        "Tabelle anklicken → Ctrl+A → Ctrl+C zum Kopieren.</div>",
+        "<div style='font-size:12.5px;color:#555;margin-bottom:8px;line-height:1.7'>"
+        "⚠️ <strong>Diese Auswahl ist noch nicht gespeichert.</strong> "
+        "Für dauerhafte Änderungen bitte ins "
+        "<a href='https://docs.google.com/spreadsheets/d/1nQEeGdvLfFtGscvujc48Qk3pwYP3JpC6lCHfgbMlkt8/edit' "
+        "target='_blank' style='color:var(--teal)'>Override-Sheet ↗</a> eintragen "
+        "— Änderungen werden beim nächsten Laden übernommen.<br>"
+        "<span style='color:#aaa;font-size:11.5px'>Tabelle anklicken → Ctrl+A → Ctrl+C zum Kopieren.</span>"
+        "</div>",
         unsafe_allow_html=True,
     )
     df = pd.DataFrame(confirmed)
@@ -413,7 +428,7 @@ def render():
         f"<div style='background:#f8fafb;border:1px solid #dde3ea;border-radius:8px;"
         f"padding:12px 16px;margin-bottom:12px;font-size:12.5px;line-height:1.8'>"
         f"<div style='color:var(--muted)'>"
-        f"Vorschau-Ansicht — Personen und Themen prüfen, bestätigen und kopieren.<br>"
+        f"<strong>Vorschau-Ansicht</strong> — Personen und Themen prüfen und bestätigen.<br>"
         f"Themen: "
         f"<a href='https://docs.google.com/spreadsheets/d/1c6Mrpr8vF82FJ2ADhLRKd_7mRm4C6fV3GSRm0Cu3Pag/edit' "
         f"target='_blank' style='color:var(--teal)'>Mittwochscurriculum ↗</a>"
@@ -422,10 +437,15 @@ def render():
         f"target='_blank' style='color:var(--teal)'>Physio-Talk ↗</a>"
         f"</div>"
         f"<div style='margin-top:6px;padding-top:6px;border-top:1px solid #eaecef;"
-        f"font-size:11.5px;color:#888'>"
-        f"ℹ️ Dieses Tool ist ein administrativer Support und kann vereinzelt Ungenauigkeiten enthalten. "
+        f"font-size:11.5px;color:#e67e22;font-weight:500'>"
+        f"⚠️ Diese Ansicht speichert nichts automatisch. "
+        f"Bestätigte Einträge bitte manuell ins "
+        f"<a href='https://docs.google.com/spreadsheets/d/1nQEeGdvLfFtGscvujc48Qk3pwYP3JpC6lCHfgbMlkt8/edit' "
+        f"target='_blank' style='color:#e67e22'>Override-Sheet ↗</a> übertragen."
+        f"</div>"
+        f"<div style='margin-top:4px;font-size:11px;color:#aaa'>"
         f"Bitte alle Einteilungen vor Versand prüfen. "
-        f"Bei Fragen: <a href='mailto:kim.backoffice1@gmail.com' style='color:#888'>kim.backoffice1@gmail.com</a>"
+        f"Bei Fragen: <a href='mailto:kim.backoffice1@gmail.com' style='color:#aaa'>kim.backoffice1@gmail.com</a>"
         f"</div>"
         f"</div>",
         unsafe_allow_html=True,
