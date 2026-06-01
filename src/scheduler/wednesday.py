@@ -196,16 +196,17 @@ def _pick_topic_for_person(responsible, topic_map, date):
     """
     Given the selected person's name (e.g. 'hahn markus' or 'h. hahn'),
     find their most overdue topic (oldest last_date) and mark it as used today.
-    Returns the topic string, or a generic fallback if nothing found.
+    Returns the topic string, or a flagged fallback if nothing found.
+    ★ = topic not found in sheet — admin should assign one manually.
     """
     if not responsible or not topic_map:
-        return "Mittwochscurriculum"
+        return "Mittwochscurriculum ★"
 
     lastname = _normalize_name_key(_extract_lastname(str(responsible).lower()))
     topics   = topic_map.get(lastname)
 
     if not topics:
-        return "Mittwochscurriculum"
+        return "Mittwochscurriculum ★"
 
     # Pick the topic with the oldest last_date (most overdue)
     topics.sort(key=lambda t: t["last_date"])
@@ -215,7 +216,7 @@ def _pick_topic_for_person(responsible, topic_map, date):
     chosen["last_date"] = pd.Timestamp(date)
 
     thema = chosen["thema"]
-    return f"Mittwochscurriculum: {thema}" if thema else "Mittwochscurriculum"
+    return f"Mittwochscurriculum: {thema}" if thema else "Mittwochscurriculum ★"
 
 
 def _find_col(df, candidates):
