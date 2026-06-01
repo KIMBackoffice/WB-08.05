@@ -92,6 +92,8 @@ st.markdown("""
     justify-content: space-between !important;
     align-items: center !important;
     height: 72px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
 }
 .kim-bar-left  { display: flex; align-items: center; gap: 0; }
 .kim-bar-right { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; }
@@ -130,7 +132,7 @@ div[data-testid="stTextInput"] input[type="password"] {
 
 # ── Header ────────────────────────────────────────────────────────────────────
 _today = datetime.date.today().strftime("%d.%m.%Y")
-_hcol, _ = st.columns([14, 1])
+_hcol = st.container()
 with _hcol:
     st.markdown(
         "<div class=\"kim-bar\">"
