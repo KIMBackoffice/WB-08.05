@@ -289,8 +289,10 @@ def pick_person_fair(pep_df, date, roles, duty_priority, selector):
         if not candidates.empty:
             return selector.pick(candidates.copy(), date)
 
-    # fallback: any eligible person regardless of duty
-    return selector.pick(day_df.copy(), date)
+    # fallback: no candidate matched preferred duty sets — pick anyone on this day.
+    # ★ appended to name so downstream (export_docx warn check, UI) can flag the row.
+    name = selector.pick(day_df.copy(), date)
+    return f"{name} ★" if name else None
 
 
 # =========================
