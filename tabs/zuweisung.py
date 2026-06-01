@@ -102,6 +102,16 @@ def _ensure_pep_norm(month: int):
     return st.session_state.get(key)
 
 
+def _safe_str(val, fallback="") -> str:
+    """Convert val to str, treating None/NaN/float-nan as fallback."""
+    if val is None:
+        return fallback
+    if isinstance(val, float):   # catches float('nan')
+        return fallback
+    s = str(val).strip()
+    return s if s and s.lower() != "nan" else fallback
+
+
 def _get_alts(row, slot_idx: int, pep_norm, override_evt_type=None) -> list:
     if pep_norm is None:
         return []
@@ -114,7 +124,7 @@ def _get_alts(row, slot_idx: int, pep_norm, override_evt_type=None) -> list:
     day_pep = pep_norm[pep_norm["date"] == d]
     if day_pep.empty:
         return []
-    responsible_raw = str(row.get("responsible", "") or "")
+    responsible_raw = _safe_str(row.get("responsible"), "")
     assigned_lns    = [_extract_lastname(p.strip()) for p in responsible_raw.split("/")]
     return _find_alternatives_ordered(day_pep, role_pool, duty_priority, assigned_lns,
                                       event_date=d)
@@ -161,9 +171,9 @@ def _count_dirty(sc_rel, edits: dict) -> int:
         staged = edits.get(idx, {})
         if not staged:
             continue
-        orig_resp  = str(row.get("responsible", "") or "")
-        orig_topic = str(row.get("topic",       "") or "")
-        orig_type  = str(row.get("event_type",  ""))
+        orig_resp  = _safe_str(row.get("responsible"), "")
+        orig_topic = _safe_str(row.get("topic"))
+        orig_type  = _safe_str(row.get("event_type"))
         if _is_truly_dirty(orig_resp, orig_topic, orig_type, staged):
             count += 1
     return count
@@ -379,14 +389,14 @@ def render():
     physio_used:set  = set()   # tracks claimed articles within this render pass
 
     for idx, row in sc_rel.iterrows():
-        if str(row.get("event_type", "")) == _JC_EVENT:
+        if _safe_str(row.get("event_type")) == _JC_EVENT:
             _date_tag = pd.Timestamp(row["date"]).strftime("%Y%m%d")
-            _evt_tag  = str(row.get("event_type", ""))[:8]
+            _evt_tag  = _safe_str(row.get("event_type"))[:8]
             _stable   = f"{_date_tag}_{_evt_tag}"
             _render_row_jc(_stable, row, month, edits, pep_norm)
         else:
             _date_tag = pd.Timestamp(row["date"]).strftime("%Y%m%d")
-            _evt_tag  = str(row.get("event_type", ""))[:8]
+            _evt_tag  = _safe_str(row.get("event_type"))[:8]
             _stable   = f"{_date_tag}_{_evt_tag}"
             _render_row_standard(
                 _stable, row, month, edits, pep_norm,
@@ -407,9 +417,9 @@ def _get_dirty_rows(sc_rel: pd.DataFrame, edits: dict) -> list:
         if idx not in sc_rel.index:
             continue
         row = sc_rel.loc[idx]
-        orig_resp  = str(row.get("responsible", "") or "")
-        orig_topic = str(row.get("topic",       "") or "")
-        orig_type  = str(row.get("event_type",  ""))
+        orig_resp  = _safe_str(row.get("responsible"), "")
+        orig_topic = _safe_str(row.get("topic"))
+        orig_type  = _safe_str(row.get("event_type"))
         if not _is_truly_dirty(orig_resp, orig_topic, orig_type, staged):
             continue
         dirty.append({
@@ -493,8 +503,8 @@ def _render_override_copybox(sc_rel: pd.DataFrame, edits: dict, month: int):
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _render_row_jc(idx, row, month, edits, pep_norm):
-    orig_resp  = str(row.get("responsible", "") or "— TBD —")
-    orig_topic = str(row.get("topic", "") or "")
+    orig_resp  = _safe_str(row.get("responsible"), "— TBD —")
+    orig_topic = _safe_str(row.get("topic"))
     staged     = edits.get(idx, {})
     cur_resp   = staged.get("responsible", orig_resp)
 
@@ -552,9 +562,9 @@ def _render_row_jc(idx, row, month, edits, pep_norm):
 
 def _render_row_standard(idx, row, month, edits, pep_norm,
                          mittwoch_df, physio_topics_df, physio_used: set):
-    orig_resp  = str(row.get("responsible", "") or "— TBD —")
-    orig_topic = str(row.get("topic",       "") or "")
-    orig_type  = str(row.get("event_type",  ""))
+    orig_resp  = _safe_str(row.get("responsible"), "— TBD —")
+    orig_topic = _safe_str(row.get("topic"))
+    orig_type  = _safe_str(row.get("event_type"))
 
     staged    = edits.get(idx, {})
     cur_resp  = staged.get("responsible", orig_resp)
