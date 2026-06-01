@@ -1,11 +1,5 @@
 # src/utils_names.py
-"""
-Name formatting — handles four input formats:
-  1. PEP format    "lastname firstname"      e.g. "grogg-trachsel hanna"  → H. Grogg-Trachsel
-  2. PEP format    "hyphen-lastname simple"  e.g. "grogg-trachsel hanna"  → H. Grogg-Trachsel
-  3. Display fmt   "Firstname Lastname"      e.g. "Yok-Ai Que"            → Y.-A. Que
-  4. Already abbr  "H. Lastname"             e.g. "H. grogg-trachsel"     → H. Grogg-Trachsel
-"""
+ 
 
 SPECIAL_CASES = {
     "fallführende ärzteschaft": "Fallführende Ärzteschaft",
@@ -110,9 +104,9 @@ def format_people(name_field: str) -> str:
 import re as _re
 
 def extract_lastname(name: str) -> str:
-    if not name:
+    if not isinstance(name, str) or not name.strip():
         return ""
-    name = str(name).lower().strip()
+    name = name.lower().strip()
     # normalise gaps in compound initials: "m.- e." → "m.-e."
     name = _re.sub(r"\.\s*-\s*", ".-", name)
     parts = name.split()
