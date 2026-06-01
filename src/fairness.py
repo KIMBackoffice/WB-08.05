@@ -45,7 +45,7 @@ def normalize_name(name):
 # -------------------------
 def is_valid_person(name):
 
-    if name is None:
+    if not isinstance(name, str) or not name.strip():
         return False
 
     name = name.lower()
