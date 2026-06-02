@@ -105,6 +105,17 @@ DUTY_CODES = {
 
 VALID_ROLES = {"CA", "SCA", "LA", "SFA_I", "SFA_II", "OA_I", "OA_II", "SOA", "AA"}
 
+# Section headers that terminate parsing — everything after these rows is
+# NOT clinical staff and must not be assigned the previous role_code.
+STOP_SECTIONS = {
+    "Wahljahrstudent/in",
+    "Fiktive Mitarbeitende",
+    "Mitarbeitergruppe 1 Bildung Fiktive M.",
+    "Interne Weiterbildungen",
+    "Kongresse / Kurse",
+    "Ferien Stadt Bern",
+}
+
 BLACKLIST = ["weiterbildungen", "ferien", "kongresse", "ablös", "aa nch"]
 
 # Sheet column order — must match PEP_all_Planung header exactly
@@ -178,6 +189,12 @@ def parse_pep_xlsx(file_bytes: bytes, year: int, month: int) -> pd.DataFrame:
 
         if first_cell in ROLE_MAP:
             current_role = first_cell
+            continue
+        # Section headers that are NOT roles → stop assigning rows to the
+        # previous role.  Everything below (Wahljahrstudenten, Fiktive
+        # Mitarbeitende, …) must not inherit the last clinical role.
+        if first_cell in STOP_SECTIONS:
+            current_role = None
             continue
         if not first_cell or first_cell == "nan":
             continue
