@@ -2,6 +2,8 @@
 
 import pandas as pd
 
+from src.utils_names import format_people
+
 
 def schedule_teaching_tuesday(df):
     """
@@ -53,19 +55,22 @@ Datum	Startzeit	Endzeit	Veranwortlich (Vorname Nachname)	Thema	Raum	Notizen
         )
 
         # -------------------------
-        # TOPIC
+        # TOPIC (speaker is NOT folded in here anymore — it goes to responsible)
         # -------------------------
-        topic_raw = row.get("thema") or ""
-
-        if speaker:
-            topic = f"{topic_raw} ({speaker})"
-        else:
-            topic = topic_raw
+        topic = str(row.get("thema") or "").strip()
 
         # -------------------------
         # ROOM
         # -------------------------
         room = row.get("raum") or ""
+
+        # -------------------------
+        # RESPONSIBLE — the sheet speaker, formatted "F. Lastname"
+        # ("Anna Messmer / Marie-Noelle Kronig" -> "A. Messmer / M.-N. Kronig").
+        # Falls back to the raw speaker string if formatting yields nothing.
+        # -------------------------
+        speaker_str = str(speaker or "").strip()
+        responsible = format_people(speaker_str) if speaker_str else ""
 
         # -------------------------
         # APPEND
@@ -74,7 +79,7 @@ Datum	Startzeit	Endzeit	Veranwortlich (Vorname Nachname)	Thema	Raum	Notizen
             "date": date,
             "time": time,
             "event_type": "Teaching_Tuesday",
-            "responsible": "Nadja Schai",  
+            "responsible": responsible,
             "topic": topic,
             "room": room
         })
