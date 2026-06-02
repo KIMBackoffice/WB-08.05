@@ -123,6 +123,16 @@ EXCLUDED_DUTY_CODES = {
 EARLIEST_ASSIGNMENT: dict = {
     # Add new entries here as needed:
     # "name lastname":     (2026, month),
+    "wolfer lukas":        (2026, 8),
+    "berner lea":          (2026, 8),
+    "sridharan alexandre": (2026, 8),
+    "sket raphael":        (2026, 8),
+    "weber annatina":      (2026, 8),
+    "michel matthias":     (2026, 8),
+    "najaf zadeh":         (2026, 8),
+    "raio noemi":          (2026, 8),
+    "trost patricia":      (2026, 8),
+    "wintsch nathalie":    (2026, 8),
 }
 
 
