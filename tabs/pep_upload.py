@@ -13,12 +13,40 @@ Flow:
 
 import io
 import re
+import time
 import datetime
 import streamlit as st
 import pandas as pd
 
 from src.ui        import banner, sec
 from src.constants import PLAN_YEAR, MONTH_LABELS
+
+# ── Sheets write helper (rate-limit safe) ─────────────────────────────────────
+
+def _append_rows_safe(ws, rows, *, value_input_option="USER_ENTERED",
+                      chunk_size=500, base_sleep=1.2, max_retries=5):
+    """
+    Append rows in chunks with exponential backoff on 429 / quota errors.
+
+    chunk_size=500  → max ~120 requests per minute (well within the 300/min limit).
+    base_sleep=1.2  → ~1.2 s between chunks; multiply by 2^attempt on 429.
+    """
+    import gspread.exceptions  # local import – avoids hard dependency at module level
+
+    for i in range(0, len(rows), chunk_size):
+        chunk = rows[i : i + chunk_size]
+        for attempt in range(max_retries):
+            try:
+                ws.append_rows(chunk, value_input_option=value_input_option)
+                break  # success
+            except Exception as exc:
+                is_quota = "429" in str(exc) or "Quota" in str(exc)
+                if is_quota and attempt < max_retries - 1:
+                    wait = base_sleep * (2 ** attempt)
+                    time.sleep(wait)
+                else:
+                    raise  # re-raise on last attempt or non-quota errors
+        time.sleep(base_sleep)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -638,11 +666,7 @@ nicht nur einzelne Tage oder Personen. Das stellt sicher dass der Plan konsisten
                 ws.clear()
                 ws.append_row(header)
                 if kept_rows:
-                    CHUNK_DEL = 500
-                    for i in range(0, len(kept_rows), CHUNK_DEL):
-                        ws.append_rows(kept_rows[i:i + CHUNK_DEL],
-                                       value_input_option="USER_ENTERED")
-                        time.sleep(0.3)
+                    _append_rows_safe(ws, kept_rows)
 
                 progress.progress(0.2, text=f"Alte Zeilen geloescht. Neue Daten werden geschrieben …")
 
@@ -661,20 +685,36 @@ nicht nur einzelne Tage oder Personen. Das stellt sicher dass der Plan konsisten
                     date_str,  # datefixed
                 ])
 
-            total   = len(batch)
-            written = 0
-            CHUNK   = 100
+            total          = len(batch)
+            written        = 0
+            CHUNK          = 500   # fewer API calls → less quota pressure
+            BASE_SLEEP     = 1.2   # seconds between chunks
+            MAX_RETRIES    = 5
             start_progress = 0.2 if replace_mode else 0.0
 
             for i in range(0, len(batch), CHUNK):
-                chunk = batch[i:i + CHUNK]
-                ws.append_rows(chunk, value_input_option="USER_ENTERED")
+                chunk = batch[i : i + CHUNK]
+                # Exponential backoff on 429
+                for attempt in range(MAX_RETRIES):
+                    try:
+                        ws.append_rows(chunk, value_input_option="USER_ENTERED")
+                        break
+                    except Exception as exc:
+                        if ("429" in str(exc) or "Quota" in str(exc)) and attempt < MAX_RETRIES - 1:
+                            wait = BASE_SLEEP * (2 ** attempt)
+                            progress.progress(
+                                start_progress + (1.0 - start_progress) * min(written / total, 1.0),
+                                text=f"Rate-Limit erreicht – warte {wait:.0f}s … ({written:,}/{total:,})",
+                            )
+                            time.sleep(wait)
+                        else:
+                            raise
                 written += len(chunk)
                 progress.progress(
                     start_progress + (1.0 - start_progress) * min(written / total, 1.0),
                     text=f"{written:,} / {total:,} Zeilen geschrieben …",
                 )
-                time.sleep(0.3)
+                time.sleep(BASE_SLEEP)
 
             progress.empty()
 
