@@ -1,7 +1,10 @@
 # src/pipeline.py
 
+import logging
 import pandas as pd
 from datetime import date, timedelta
+
+logger = logging.getLogger(__name__)
 
 # =========================
 # IMPORT SCHEDULERS
@@ -83,10 +86,7 @@ def ensure_schema(df):
 
     df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.normalize()
 
-    # Keep required columns first, then any extra columns (e.g. zielgruppe, zg_unknown)
-    # so downstream consumers like export_docx.py can read them.
-    extra = [c for c in df.columns if c not in required]
-    return df[required + extra]
+    return df[required]
 
 
 # =========================
@@ -159,9 +159,9 @@ def generate_calendar(year, month):
                     "week": d.isocalendar()[1]
                 })
             else:
-                print(
-                    f"[Feiertag] Skipped {d.strftime('%A %d.%m.%Y')} "
-                    f"({get_feiertag_name(ts)}) from calendar"
+                logger.info(
+                    "[Feiertag] Skipped %s (%s) from calendar",
+                    d.strftime('%A %d.%m.%Y'), get_feiertag_name(ts)
                 )
 
         d += timedelta(days=1)
@@ -312,9 +312,9 @@ def generate_full_schedule(year, month, data):
     full    = full[~(on_holiday & is_algorithmic)].copy()
 
     for _, r in removed.iterrows():
-        print(
-            f"[Feiertag] Removed {r['event_type']} on "
-            f"{r['date'].strftime('%d.%m.%Y')} ({get_feiertag_name(r['date'])})"
+        logger.info(
+            "[Feiertag] Removed %s on %s (%s)",
+            r['event_type'], r['date'].strftime('%d.%m.%Y'), get_feiertag_name(r['date'])
         )
 
     full = enrich_schedule(full)
@@ -328,6 +328,46 @@ def generate_full_schedule(year, month, data):
 # =========================
 # MULTI-MONTH AWARE SCHEDULE
 # =========================
+
+# In-process cache for the warm multi-month pass. Keyed by a signature of the
+# inputs so that looping over months (one generate_full_schedule_aware call per
+# month) reuses a single shared-selector pass instead of rebuilding an empty
+# selector every call. This is what gives real cross-month fairness memory.
+_AWARE_CACHE: dict = {}
+
+
+def _aware_signature(year, all_pep_months, data):
+    """Build a lightweight signature of the inputs that affect assignment."""
+    import hashlib
+    pep = data.get("pep")
+    hist = data.get("history")
+    parts = [str(year), ",".join(map(str, all_pep_months))]
+    for df in (pep, hist):
+        if df is not None and hasattr(df, "shape"):
+            parts.append(f"{df.shape}")
+            try:
+                # include a hash of the values so edits invalidate the cache
+                parts.append(str(int(pd.util.hash_pandas_object(df, index=True).sum())))
+            except Exception:
+                parts.append(str(len(df)))
+        else:
+            parts.append("none")
+    return hashlib.md5("|".join(parts).encode()).hexdigest()
+
+
+def _get_aware_cache(year, all_pep_months, data, month):
+    sig = _aware_signature(year, all_pep_months, data)
+    entry = _AWARE_CACHE.get(sig)
+    if entry is None:
+        return None
+    return entry.get(month)
+
+
+def _store_aware_cache(year, all_pep_months, data, computed_months):
+    sig = _aware_signature(year, all_pep_months, data)
+    _AWARE_CACHE.clear()  # only keep the most recent input signature
+    _AWARE_CACHE[sig] = computed_months
+
 
 def generate_full_schedule_aware(year, month, data):
     """
@@ -362,18 +402,39 @@ def generate_full_schedule_aware(year, month, data):
     pep_df_raw["role_code"]  = pep_df_raw["role_code"].astype(str).str.strip()
     pep_df_raw["name_clean"] = pep_df_raw["name_clean"].astype(str).str.strip().str.lower()
 
-    # Only iterate from the current month onward — past months are finalised
-    # and already reflected in the history sheet that seeds the selector.
+    # Iterate only STRICTLY FUTURE months (relative to today). The current
+    # month and all past months are excluded — past months are finalised and
+    # already reflected in the history sheet that seeds the selector, and the
+    # current month is treated as finalised too (per planning policy).
+    #
+    # "Future" is computed on the full (year, month) period, NOT the month
+    # number alone, so a PEP plan that spans two calendar years (e.g. Dec 2026
+    # + Jan 2027) is handled correctly and same-month-different-year never
+    # collapses. We still iterate within THIS call's `year` scope, since the
+    # caller passes one PLAN_YEAR per call and the calendar is built per-year.
     today = datetime.date.today()
-    current_month = today.month
+    current_period = (today.year, today.month)
 
+    # Distinct (year, month) periods present in the PEP data.
+    pep_periods = sorted({
+        (int(ts.year), int(ts.month))
+        for ts in pep_df_raw["date"].dropna()
+    })
+
+    # Months belonging to THIS call's year that are strictly in the future.
     all_pep_months = sorted(
-        m for m in pep_df_raw["date"].dt.month.dropna().astype(int).unique()
-        if m >= current_month
+        m for (y, m) in pep_periods
+        if y == year and (y, m) > current_period
     )
 
     if month not in all_pep_months:
         return generate_sheet_only_schedule(year, month, data)
+
+    # If we already computed this exact warm pass (same year, same set of
+    # months, same input data) on a previous per-month call, reuse it.
+    cached = _get_aware_cache(year, all_pep_months, data, month)
+    if cached is not None:
+        return cached
 
     # One shared selector — history seeds past load; selector accumulates
     # current-year assignments month by month as the loop progresses.
@@ -388,6 +449,13 @@ def generate_full_schedule_aware(year, month, data):
     target_schedule = None
     # Shared set — ensures each PHYSIO slot across months picks a different paper
     _physio_picked: set = set()
+
+    # Collect EVERY computed month, not just the target. The warm selector
+    # pass already produces all of them; caching them means that when the
+    # caller loops month-by-month (analyse.py, etc.) the cross-month
+    # assignment memory is actually preserved instead of being thrown away
+    # and recomputed from an empty selector on every call.
+    computed_months: dict = {}
 
     for m in all_pep_months:
 
@@ -419,9 +487,14 @@ def generate_full_schedule_aware(year, month, data):
         full = full.sort_values(["date", "time"])
         full["responsible"] = full["responsible"].apply(format_people)
 
+        computed_months[m] = full.reset_index(drop=True)
         if m == month:
-            target_schedule = full.reset_index(drop=True)
+            target_schedule = computed_months[m]
             # Continue loop so selector stays warm for remaining months
+
+    # Cache the whole warm pass so subsequent per-month calls with the same
+    # inputs reuse it (preserving cross-month fairness memory).
+    _store_aware_cache(year, all_pep_months, data, computed_months)
 
     return target_schedule if target_schedule is not None else pd.DataFrame()
 
