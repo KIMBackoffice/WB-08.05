@@ -64,11 +64,16 @@ class SmartFairSelector:
         # recently start with a higher penalty score and are less likely
         # to be picked again.
         #
-        # Weights decay by recency:
+        # Weights decay by recency — extended tail so people who presented
+        # 4-6 months ago are still slightly penalised (slow 0.1x evaporation)
+        # instead of looking identical to someone who never presented:
         #   1 month ago → 3.0  (strong penalty)
         #   2 months ago → 1.5
-        #   3 months ago → 0.5
-        #   > 3 months  → 0.0  (ignored)
+        #   3 months ago → 0.8
+        #   4 months ago → 0.3
+        #   5 months ago → 0.2
+        #   6 months ago → 0.1
+        #   > 6 months  → 0.0  (ignored)
         #
         # Keys stored as LASTNAME so history names ('h. grogg-trachsel')
         # correctly match PEP names ('grogg-trachsel hanna').
@@ -77,7 +82,10 @@ class SmartFairSelector:
         HISTORY_WEIGHT_BY_MONTHS_AGO = {
             1: 3.0,
             2: 1.5,
-            3: 0.5,
+            3: 0.8,
+            4: 0.3,
+            5: 0.2,
+            6: 0.1,
         }
 
         HISTORY_RELEVANT_EVENTS = {
@@ -115,7 +123,7 @@ class SmartFairSelector:
                     months_ago = round((today_ts - row["date"]).days / 30.44)
                     # Clamp: 0 or negative means "this month or future" → treat as 1 month ago
                     months_ago = max(1, months_ago)
-                    weight = HISTORY_WEIGHT_BY_MONTHS_AGO.get(min(months_ago, 3), 0.0)
+                    weight = HISTORY_WEIGHT_BY_MONTHS_AGO.get(min(months_ago, 6), 0.0)
                     if weight == 0:
                         continue
 
@@ -144,21 +152,29 @@ class SmartFairSelector:
         Lower score = better candidate.
 
         Three components:
-          1. current_count × 10   frequency in this generation run
-          2. recency_penalty      days since last assignment (max 10, fades over 10 days)
+          1. current_count × 30   frequency in this generation run (heavily penalised)
+          2. recency_penalty      days since last assignment — large penalty that
+                                   fades linearly over RECENCY_DECAY_DAYS (~75 days,
+                                   i.e. 2.5 months) so someone assigned recently stays
+                                   strongly deprioritised well beyond two weeks
           3. history_load × 10    historical assignments, matched by lastname,
-                                   decayed by recency (3→1.5→0.5 over 3 months)
+                                   decayed by recency (3→1.5→0.8→0.3→0.2→0.1 over 6 months)
         """
         count = self.assignment_counts.get(name, 0)
         last  = self.last_assigned.get(name)
 
-        # 1. frequency penalty
-        score = count * 10
+        # 1. frequency penalty — within this run, being picked even once
+        #    should outweigh almost any history difference.
+        score = count * 30
 
-        # 2. recency penalty — fades over 14 days (was 10)
+        # 2. recency penalty — fades linearly over ~75 days (2.5 months).
+        #    Max penalty (50) right after an assignment, decaying to 0 at 75 days.
+        RECENCY_DECAY_DAYS = 75
+        RECENCY_MAX_PENALTY = 50
         if last:
-            days   = (date - last).days
-            score += max(0, 14 - days)
+            days = (date - last).days
+            if days < RECENCY_DECAY_DAYS:
+                score += RECENCY_MAX_PENALTY * (RECENCY_DECAY_DAYS - days) / RECENCY_DECAY_DAYS
 
         # 3. historical load — match by lastname
         lastname  = _extract_lastname(name)
@@ -183,15 +199,36 @@ class SmartFairSelector:
     # =========================
     # PICK PERSON
     # =========================
-    def pick(self, df, date):
+    def pick(self, df, date, exclude=None, hard_gap=True):
+        """
+        Pick the fairest candidate from df for this date.
+
+        hard_gap=True  → the minimum-gap rule is a HARD filter. If every
+                         candidate in df is still inside their role's minimum
+                         gap, this returns None to signal "no gap-eligible
+                         candidate in this pool". The caller (pick_person_fair)
+                         then widens to the next duty tier before giving up.
+        hard_gap=False → used only for the final whole-day fallback. The gap
+                         rule is relaxed and we pick whoever was assigned
+                         LONGEST ago (never raw score on a recently-used person).
+        """
         if df.empty:
             return None
 
         df = df.copy()
+        exclude = set(exclude or [])
 
         # -------------------------
         # FILTERS — applied progressively, each only if candidates remain
         # -------------------------
+
+        # 0. Exclude names already chosen for another slot on the same day
+        #    (e.g. the Journal Club intermediate slot must not also fill the
+        #    AA slot, and vice versa). Only applied if candidates remain.
+        if exclude:
+            filtered = df[~df["name_clean"].isin(exclude)]
+            if not filtered.empty:
+                df = filtered
 
         # 1. Earliest assignment start date
         filtered = df[df["name_clean"].apply(lambda n: is_allowed_by_start_date(n, date))]
@@ -211,14 +248,12 @@ class SmartFairSelector:
         # so the slot is never empty. This is intentional — hard exclusions should
         # be rare edge cases; the slot still needs to be filled.
 
-        # 4. Minimum gap between assignments (hard filter, role-aware)
-        # AA: blocked within 1 month | Intermediate: 2 months | Senior: 3 months
-        # Only applied when at least one unblocked candidate remains.
+        # 4. Minimum gap between assignments (role-aware)
+        # AA: blocked within 30 days | Intermediate: 60 | Senior: 91
         def _gap_days_for(name):
             role = df_roles.get(name, None)
             return MIN_GAP_DAYS_BY_ROLE.get(role, MIN_GAP_DAYS_DEFAULT)
 
-        # build role lookup for current candidate set
         df_roles = dict(zip(df["name_clean"], df.get("role_code", pd.Series(dtype=str))))
 
         def _recently_assigned(name):
@@ -227,20 +262,32 @@ class SmartFairSelector:
                 return False
             return (date - last).days < _gap_days_for(name)
 
-        filtered = df[~df["name_clean"].apply(_recently_assigned)]
-        if not filtered.empty:
-            df = filtered
-        # If everyone is blocked (tiny pool), fall through with full set.
+        gap_ok = df[~df["name_clean"].apply(_recently_assigned)]
+
+        if not gap_ok.empty:
+            # Normal path: at least one candidate clears the gap.
+            df = gap_ok
+        elif hard_gap:
+            # HARD gap mode: nobody in this pool clears the gap. Do NOT pick
+            # here — signal the caller to widen to the next duty tier.
+            return None
+        else:
+            # SOFT fallback (whole-day pool already exhausted of gap-eligible
+            # people): pick whoever was assigned LONGEST ago so we still
+            # respect the spirit of the gap rule as much as possible.
+            def _days_since(name):
+                last = self.last_assigned.get(name)
+                if last is None:
+                    return 10**9  # never assigned → best possible
+                return (date - last).days
+            df = df.assign(_days_since=df["name_clean"].apply(_days_since))
+            max_days = df["_days_since"].max()
+            df = df[df["_days_since"] == max_days].drop(columns=["_days_since"])
 
         # -------------------------
         # SCORING + STABLE SORT
-        # Recency rules are implemented as score penalties, NOT hard filters.
-        # This means: if everyone was assigned recently, the least-penalised
-        # person still gets picked. Slots are never empty due to recency.
         # -------------------------
         df["score"] = df["name_clean"].apply(lambda n: self.score(n, date))
-
-        # Stable random seed = same result every regeneration for same inputs
         df = df.sample(frac=1, random_state=42)
         df = df.sort_values("score", kind="mergesort")
 
@@ -260,21 +307,32 @@ class SmartFairSelector:
 # RULE-BASED SELECTION
 # =========================
 
-def pick_person_fair(pep_df, date, roles, duty_priority, selector):
+def pick_person_fair(pep_df, date, roles, duty_priority, selector, exclude=None):
     """
     Step 1: filter PEP to this date + required roles
     Step 2: try each duty priority set in order
     Step 3: apply fairness scoring via selector
 
-    FALLBACK: if all candidates are filtered out by earliest-start /
-    first-month / exclusion rules, we still must fill the slot.
-    The selector.pick() already handles this internally by only applying
-    filters when they leave at least one candidate.
+    exclude: optional iterable of name_clean values that must not be picked
+             (used to stop the same person filling two slots on one day).
 
-    RECENCY FALLBACK: the selector penalises recently-assigned people
-    via score, but does NOT hard-exclude them — so if everyone was
-    assigned recently, the least-recently-assigned person still gets
-    picked. This means slots are never left empty due to recency rules.
+    GAP RULE — genuinely hard, with graceful widening, but NEVER escaping the
+    allowed duty codes:
+
+      duty_priority is the EXHAUSTIVE allow-list of assignable duties. Duty
+      codes outside it (Ferien, Kongress, Wunschfrei, Besonderes, etc.) mean
+      the person is NOT available and must never be chosen — not even as a
+      last-resort fallback.
+
+      1. Try each duty tier in priority order. Within a tier the minimum-gap
+         rule is a HARD filter. If everyone in that tier is still inside their
+         gap, pick() returns None and we move to the NEXT tier.
+      2. If a later tier has a gap-eligible person, they are chosen — widening
+         across the *allowed* duties before weakening the recency guarantee.
+      3. Only if NO allowed tier contains a gap-eligible candidate do we relax
+         the gap: pick whoever was assigned LONGEST ago, but STILL only from
+         the union of the allowed duty pools — never from the whole-day role
+         pool. This keeps unavailable duties (Ferien etc.) out entirely.
     """
     day_df = pep_df[
         (pep_df["date"].dt.normalize() == pd.Timestamp(date).normalize()) &
@@ -284,15 +342,32 @@ def pick_person_fair(pep_df, date, roles, duty_priority, selector):
     if day_df.empty:
         return None
 
+    # Union of every allowed duty code across all priority tiers. This is the
+    # ONLY set of people who may ever be assigned — anyone outside it is on a
+    # non-assignable duty (Ferien, Kongress, Wunschfrei, Besonderes, ...).
+    allowed_duties = set()
     for duty_set in duty_priority:
-        candidates = day_df[day_df["duty_code"].isin(duty_set)]
-        if not candidates.empty:
-            return selector.pick(candidates.copy(), date)
+        allowed_duties |= set(duty_set)
+    allowed_df = day_df[day_df["duty_code"].isin(allowed_duties)]
 
-    # fallback: no candidate matched preferred duty sets — pick anyone on this day.
-    # ★ appended to name so downstream (export_docx warn check, UI) can flag the row.
-    name = selector.pick(day_df.copy(), date)
-    return f"{name} ★" if name else None
+    if allowed_df.empty:
+        # Nobody with the right role is on an assignable duty today.
+        return None
+
+    # 1. + 2. Walk duty tiers in priority order; hard gap means an exhausted
+    #    tier yields None, so we automatically widen to the next tier.
+    for duty_set in duty_priority:
+        candidates = allowed_df[allowed_df["duty_code"].isin(duty_set)]
+        if candidates.empty:
+            continue
+        picked = selector.pick(candidates.copy(), date, exclude=exclude, hard_gap=True)
+        if picked is not None:
+            return picked
+
+    # 3. Last resort: every allowed tier is gap-blocked. Relax the gap and pick
+    #    the longest-ago person — but ONLY from the allowed duty pool, never
+    #    from people on Ferien/Kongress/Wunschfrei/etc.
+    return selector.pick(allowed_df.copy(), date, exclude=exclude, hard_gap=False)
 
 
 # =========================
