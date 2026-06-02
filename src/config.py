@@ -121,15 +121,6 @@ EXCLUDED_DUTY_CODES = {
 # need a longer onboarding period before taking assignments.
 
 EARLIEST_ASSIGNMENT: dict = {
-    # Frühjahr 2026 — new staff not yet ready in April
-    "muller sarah":        (2026, 5),
-    "bernasconi elettra":  (2026, 5), 
-    "lalancette maxime":   (2026, 5),
-    "krebs tobias":        (2026, 5),
-    "gloor manuel":        (2026, 5),   
-    "matter maxime":       (2026, 5),
-    # Later starts
-    "buchholz ulrike":     (2026, 7),
     # Add new entries here as needed:
     # "name lastname":     (2026, month),
 }
