@@ -74,6 +74,11 @@ def parse_date(x):
 def ensure_schema(df):
 
     required = ["date", "time", "event_type", "responsible", "topic", "room"]
+    # Optional per-row columns that some schedulers attach (e.g. diverse.py
+    # sets per-row Zielgruppe checkboxes). These must survive the schema fixer,
+    # otherwise export_docx falls back to the all-audiences default and every
+    # box gets checked. Preserved only when actually present on the frame.
+    optional = ["zielgruppe", "zg_unknown"]
 
     if df is None or df.empty:
         return pd.DataFrame(columns=required)
@@ -86,7 +91,8 @@ def ensure_schema(df):
 
     df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.normalize()
 
-    return df[required]
+    keep = required + [c for c in optional if c in df.columns]
+    return df[keep]
 
 
 # =========================
