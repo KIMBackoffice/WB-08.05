@@ -20,33 +20,93 @@ SENIOR_ROLES      = {"CA", "SCA", "LA", "SFA_I"}
 # =========================
 # DUTY TYPES (PEP)
 # =========================
+# Format of inline comments:  # ROLLE | <PEP duty name>
+# ROLLE = OA (Ober-/Kaderarzt duties) or AA (Assistenzarzt duties).
+# OA/AA Rollentrennung is strict: AA events only ever use AA duty pools,
+# OA/intermediate events only ever use OA duty pools. Never mix.
+#
+# Only the codes listed in the sets below are ASSIGNABLE. Every other duty
+# code (see EXCLUDED_DUTY_CODES at the bottom) means the person is away or
+# otherwise unavailable and is never picked.
 
-# Spätdienst
-SPAETDIENST = {102, 271, 166}
+# Spätdienst — OA pool (used by Wed/Fri intermediate slots, NOT by AA events)
+SPAETDIENST = {
+    102,   # OA | Spätdienst Zone IB OA
+    271,   # OA | Spätdienst Intensivstation
+    166,   # OA | Spätdienst IMC
+}
 
-# AA Tagdienst
+# AA Tagdienst / Forschung — AA pool (used by COD_JUNIOR / PEER / PHYSIO, and Fri AA slot)
 TAGDIENST_AA = {
-    1072,  # blau AA
-    113,   # gelb AA
-    719    # Neuro IMC
+    1072,  # AA | Tagdienst Blau Assistenzarzt
+    113,   # AA | Tagdienst gelb Assistenzarzt
+    719,   # AA | Tagdienst Neuro IMC
+    741,   # AA | Forschung AA
 }
 
-# OA Tagdienst
+# OA Tagdienst — OA pool
 TAGDIENST_OA = {
-    101,   # gelb OA
-    119,   # blau OA
-    165    # IMC OA
+    101,   # OA | Tagdienst gelb Oberarzt
+    119,   # OA | Tagdienst blau Oberarzt
+    165,   # OA | Tagdienst IMC Oberarzt
 }
 
-# Büro / Forschung
+# Büro / Forschung — OA pool
 BUERO_FORSCHUNG_OA = {
-    117,   # Bürotag
-    705,   # Forschung OA
+    117,   # OA | Bürotag
+    705,   # OA | Forschung OA
 }
 
-# S-Dienst (Senior duty) — used for COD_SENIOR selection
-# This is a separate entity from Spätdienst
-S_DIENST = {823}
+# S-Dienst — Senior pool, used for COD_SENIOR selection only.
+# Separate entity from Spätdienst.
+S_DIENST = {
+    823,   # Senior | S-Dienst
+}
+
+
+# =========================
+# EXCLUDED DUTY CODES — reference only (NOT used by the algorithm)
+# =========================
+# These codes appear in PEP but are intentionally NOT in any assignable set
+# above. They mean the person is absent, off, on night/weekend duty, or doing
+# something non-teaching, so they must never be assigned. Listed here purely
+# for documentation / future review — the selector excludes anything not in
+# the assignable sets, so this dict is not referenced in code.
+EXCLUDED_DUTY_CODES = {
+    100:  "Besonderes",
+    103:  "Nachtdienst Oberarzt",
+    123:  "Lehre",
+    128:  "Tagdienst Wochenende / Feiertag Oberarzt",
+    129:  "Nachtdienst Assistenzarzt",
+    134:  "Nachtdienst Wochenende / Feiertag Assistenzarzt",
+    175:  "Tagdienst Wochenende / Feiertag Assistenzarzt",
+    180:  "Nachtdienst Wochenende / Feiertag Oberarzt",
+    1704: "Pikett 12h Intervent. <30Min.",
+    2461: "Tagdienst IB grün",          # clinical — left out for now (role unclear)
+    2834: "KISS",
+    332:  "Platzhalter",
+    369:  "Hochzeit",
+    374:  "Auswärtige Sitzung",
+    387:  "Kongress OA",
+    721:  "Tagdienst Zone IMC Viszeral", # excluded per decision
+    802:  "Wunsch kein Dienst",
+    826:  "Einführung",
+    827:  "Betriebsleitung",
+    3000: "Ferien",
+    3025: "Ferien UNI-Besoldete/Fiktive ohne Ferienguthaben",
+    3030: "Krankheit -30",
+    3037: "Schwangerschaftsbeschwerden 30+",
+    3050: "Militär",
+    3081: "Bildung OA",
+    3096: "Bildung Intern OA",
+    3100: "Mutterschaftsurlaub",
+    3120: "Dienstalter",
+    3130: "Komp. Ueberstunden",
+    3136: "Komp. Zeitgutschrift OA",
+    3140: "Ruhetag",
+    3145: "freier Tag",
+    3150: "Wunschfrei",
+}
 
 
 # =========================
