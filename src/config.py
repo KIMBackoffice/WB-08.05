@@ -119,32 +119,36 @@ EXCLUDED_DUTY_CODES = {
 # Typical use: new AA / OA who joined mid-year and should not present
 # in their first month (handled separately by is_first_month) OR who
 # need a longer onboarding period before taking assignments.
-
+ 
 EARLIEST_ASSIGNMENT: dict = {
     # Add new entries here as needed:
     # "name lastname":     (2026, month),
-    "wolfer lukas":        (2026, 8),
-    "berner lea":          (2026, 8),
-    "sridharan alexandre": (2026, 8),
-    "sket raphael":        (2026, 8),
-    "weber annatina":      (2026, 8),
-    "michel matthias":     (2026, 8),
-    "najaf zadeh":         (2026, 8),
-    "raio noemi":          (2026, 8),
-    "trost patricia":      (2026, 8),
-    "wintsch nathalie":    (2026, 8),
+    "wolfer lukas":        (2026, 9),
+    "berner lea":          (2026, 9),
+    "sridharan alexandre": (2026, 9),
+    "sket raphael":        (2026, 9),
+    "weber annatina":      (2026, 9),
+    "michel matthias":     (2026, 9),
+    "najaf zadeh":         (2026, 9),
+    "raio noemi":          (2026, 9),
+    "trost patricia":      (2026, 9),
+    "wintsch nathalie":    (2026, 9),
+    "jaquier marie-eve":   (2026, 10),
+    "lötscher stefan":     (2026, 10),
 }
-
-
+ 
+ 
 # =========================
 # PERMANENT EXCLUSIONS
 # =========================
 # People never assigned by the algorithm regardless of duty/role.
 # Typical use: part-time staff, on long leave, or explicitly opted out.
-
+ 
 EXCLUDED_FROM_ASSIGNMENT: set = {
     "kyriazi maria",
     "spitz lena-franziska",
+    "buchholz ulrike",
     # Add further exclusions here:
     # "name lastname",
 }
+ 
