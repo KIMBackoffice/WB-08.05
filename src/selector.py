@@ -187,14 +187,12 @@ class SmartFairSelector:
     # FIRST-MONTH RULE
     # =========================
     def is_first_month(self, name, date):
-        """Block people from being assigned in their very first month in PEP."""
+        """Block people from being assigned in their first 2 months in PEP."""
         first_seen = self.person_stats.get("first_seen", {}).get(name)
         if first_seen is None:
             return False
-        return (
-            first_seen.year == date.year and
-            first_seen.month == date.month
-        )
+        months_since = (date.year - first_seen.year) * 12 + (date.month - first_seen.month)
+        return months_since < 2
 
     # =========================
     # PICK PERSON
