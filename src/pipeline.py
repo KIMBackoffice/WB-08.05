@@ -324,7 +324,7 @@ def generate_full_schedule(year, month, data):
         )
 
     full = enrich_schedule(full)
-    full = resolve_friday_conflicts(full)
+    # TEMP DISABLED: full = resolve_friday_conflicts(full)
     full = full.sort_values(["date", "time"])
     full["responsible"] = full["responsible"].apply(format_people)
 
@@ -489,7 +489,7 @@ def generate_full_schedule_aware(year, month, data):
         ].copy()
 
         full = enrich_schedule(full)
-        full = resolve_friday_conflicts(full)
+        # TEMP DISABLED: full = resolve_friday_conflicts(full)
         full = full.sort_values(["date", "time"])
         full["responsible"] = full["responsible"].apply(format_people)
 
@@ -629,7 +629,7 @@ def generate_sheet_only_schedule(year, month, data):
     ].copy()
 
     full = enrich_schedule(full)
-    full = resolve_friday_conflicts(full)
+    # TEMP DISABLED: full = resolve_friday_conflicts(full)
     full = full.sort_values(["date", "time"])
     full["responsible"] = full["responsible"].apply(format_people)
     full["month"] = month
