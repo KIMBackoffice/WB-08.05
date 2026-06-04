@@ -135,6 +135,7 @@ EARLIEST_ASSIGNMENT: dict = {
     "wintsch nathalie":    (2026, 9),
     "jaquier marie-eve":   (2026, 10),
     "lötscher stefan":     (2026, 10),
+    "major luca":          (2026, 9), 
 }
  
  
