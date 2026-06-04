@@ -228,11 +228,12 @@ class SmartFairSelector:
             if not filtered.empty:
                 df = filtered
 
-        # 1. Earliest assignment start date
-        filtered = df[df["name_clean"].apply(lambda n: is_allowed_by_start_date(n, date))]
-        if not filtered.empty:
-            df = filtered
-
+        # 1. Earliest assignment start date — HARD LIMIT
+        df = df[df["name_clean"].apply(lambda n: is_allowed_by_start_date(n, date))]
+        if df.empty:
+            return None  # no eligible candidate; caller will leave slot blank
+        
+            
         # 2. Skip people in their very first month in PEP
         filtered = df[~df["name_clean"].apply(lambda n: self.is_first_month(n, date))]
         if not filtered.empty:
