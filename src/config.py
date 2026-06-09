@@ -133,8 +133,8 @@ EARLIEST_ASSIGNMENT: dict = {
     "raio noemi":          (2026, 9),
     "trost patricia":      (2026, 9),
     "wintsch nathalie":    (2026, 9),
-    "jaquier marie-eve":   (2026, 7),
-    "lötscher stefan":     (2026, 10),
+    "jaquier marie-eve":   (2026, 9),
+    "lötscher stefan":     (2026, 9),
     "major luca":          (2026, 9), 
 }
  
