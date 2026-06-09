@@ -147,8 +147,9 @@ EARLIEST_ASSIGNMENT: dict = {
  
 EXCLUDED_FROM_ASSIGNMENT: set = {
     "kyriazi maria",
-    "spitz lena-franziska",
-    "buchholz ulrike",
+    "spitz lena-franziska", 
+    "major luca", 
+    "mazyad haian",
     # Add further exclusions here:
     # "name lastname",
 }
