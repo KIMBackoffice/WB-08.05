@@ -26,7 +26,7 @@ def schedule_montagscurriculum(df):
             "time": f"{row.get('startzeit')}-{row.get('endzeit')}",
             "event_type": "Montagscurriculum",
             "responsible": row.get("veranwortlich (vorname nachname)"),
-            "topic": f"Montagscurriculum: {row.get('thema')}" if row.get("thema") else "Montagscurriculum",
+            "topic": row.get("thema") if row.get("thema") else "Montagscurriculum",
             "room": row.get("raum")
         })
 
