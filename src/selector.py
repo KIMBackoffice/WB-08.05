@@ -18,17 +18,17 @@ from src.utils_names import extract_lastname as _extract_lastname
 # If everyone is blocked (tiny pool), filter is skipped so slot is never empty.
 # =========================
 MIN_GAP_DAYS_BY_ROLE = {
-    "AA":     30,   # 1 month
+    "AA":     60,   # 1 month
     "SOA":    60,   # 2 months — INTERMEDIATE
     "OA_I":   60,
     "OA_II":  60,
     "SFA_II": 60,
-    "CA":     91,   # 3 months — SENIOR
-    "SCA":    91,
-    "LA":     91,
-    "SFA_I":  91,
+    "CA":     60,   # 3 months — SENIOR
+    "SCA":    60,
+    "LA":     60,
+    "SFA_I":  60,
 }
-MIN_GAP_DAYS_DEFAULT = 30  # fallback for unknown roles
+MIN_GAP_DAYS_DEFAULT = 60  # fallback for unknown roles
 
 # =========================
 # EARLIEST ASSIGNMENT GUARD
@@ -51,11 +51,24 @@ def is_allowed_by_start_date(name, date):
 
 class SmartFairSelector:
 
-    def __init__(self, person_stats=None, history_df=None):
+    def __init__(self, person_stats=None, history_df=None, aa_type_map=None):
         self.assignment_counts = {}
         self.last_assigned     = {}
+        # Cross-month HARD-gap memory, keyed by LASTNAME (same key format as
+        # history_counts). Populated from history_df below so the 60-day
+        # Sperre is enforced against PREVIOUS months, not just within this
+        # generation run. self.last_assigned (keyed by name_clean) still
+        # tracks picks made during THIS run; _recently_assigned() checks both.
+        self.last_assigned_hist = {}
         self.month_assignments = {}
         self.person_stats      = person_stats or {}
+        # name_clean(lower) -> "fellow" | "rotation". Blank/unknown AAs default
+        # to "fellow" at lookup time via aa_type_of(). Empty dict => every AA
+        # is treated as "fellow".
+        self.aa_type_map       = {
+            str(k).strip().lower(): str(v).strip().lower()
+            for k, v in (aa_type_map or {}).items()
+        }
 
         # -------------------------
         # HISTORICAL LOAD
@@ -143,6 +156,17 @@ class SmartFairSelector:
                         self.history_counts[lastname] = (
                             self.history_counts.get(lastname, 0) + weight
                         )
+                        # Track the MOST RECENT historical date per lastname so
+                        # the hard 60-day gap can see across months. Unlike the
+                        # weighted score above, this is NOT decayed — we keep the
+                        # latest real assignment date regardless of how old it is,
+                        # and _recently_assigned() decides if it's within the gap.
+                        # Record EVERY historical date for this person (not just
+                        # the latest) so the gap check can pick the most recent
+                        # date that is still <= the event being planned. The
+                        # sheet contains future-month rows too, so a single max
+                        # would hide the relevant earlier date.
+                        self.last_assigned_hist.setdefault(lastname, []).append(row["date"])
 
     def _month_key(self, date):
         return (date.year, date.month)
@@ -195,9 +219,19 @@ class SmartFairSelector:
         return months_since < 2
 
     # =========================
+    # AA TYPE (Fellow / Rotation)
+    # =========================
+    def aa_type_of(self, name) -> str:
+        """
+        Return 'fellow' or 'rotation' for a given AA name_clean.
+        Unknown / blank / not-in-registry defaults to 'fellow' (admin decision).
+        """
+        return self.aa_type_map.get(str(name).strip().lower(), "fellow")
+
+    # =========================
     # PICK PERSON
     # =========================
-    def pick(self, df, date, exclude=None, hard_gap=True):
+    def pick(self, df, date, exclude=None, hard_gap=True, aa_type=None):
         """
         Pick the fairest candidate from df for this date.
 
@@ -206,9 +240,18 @@ class SmartFairSelector:
                          gap, this returns None to signal "no gap-eligible
                          candidate in this pool". The caller (pick_person_fair)
                          then widens to the next duty tier before giving up.
-        hard_gap=False → used only for the final whole-day fallback. The gap
-                         rule is relaxed and we pick whoever was assigned
-                         LONGEST ago (never raw score on a recently-used person).
+        hard_gap=False → the gap rule is relaxed and we pick whoever was
+                         assigned LONGEST ago (never raw score on a recently-
+                         used person). Used only as a deliberate soft fallback.
+
+        aa_type        → if set ('fellow' or 'rotation'), restricts candidates
+                         to AAs of that type. If nobody matches, returns None
+                         so the caller can try the other type.
+
+        NONE-OVER-FORCE POLICY (important):
+          We never "draft a warm body". If no candidate survives the mandatory
+          filters (start-date, permanent exclusion, gap in hard mode), this
+          returns None and the slot stays empty.
         """
         if df.empty:
             return None
@@ -217,46 +260,70 @@ class SmartFairSelector:
         exclude = set(exclude or [])
 
         # -------------------------
-        # FILTERS — applied progressively, each only if candidates remain
+        # FILTERS — applied progressively
         # -------------------------
 
         # 0. Exclude names already chosen for another slot on the same day
-        #    (e.g. the Journal Club intermediate slot must not also fill the
-        #    AA slot, and vice versa). Only applied if candidates remain.
+        #    (only applied if candidates remain).
         if exclude:
             filtered = df[~df["name_clean"].isin(exclude)]
             if not filtered.empty:
                 df = filtered
 
+        # 0b. AA-TYPE filter (Fellow / Rotation) — HARD. If no candidate of the
+        #     requested type exists, return None so the caller falls back to
+        #     the other type.
+        if aa_type is not None:
+            want = str(aa_type).strip().lower()
+            df = df[df["name_clean"].apply(lambda n: self.aa_type_of(n) == want)]
+            if df.empty:
+                return None
+
         # 1. Earliest assignment start date — HARD LIMIT
         df = df[df["name_clean"].apply(lambda n: is_allowed_by_start_date(n, date))]
         if df.empty:
-            return None  # no eligible candidate; caller will leave slot blank
-        
-            
+            return None  # no eligible candidate; caller leaves slot blank
+
         # 2. Skip people in their very first month in PEP
         filtered = df[~df["name_clean"].apply(lambda n: self.is_first_month(n, date))]
         if not filtered.empty:
             df = filtered
 
-        # 3. Permanent exclusions
-        filtered = df[~df["name_clean"].isin(EXCLUDED_FROM_ASSIGNMENT)]
-        if not filtered.empty:
-            df = filtered
-        # NOTE: if all candidates are excluded, we proceed with the unfiltered set
-        # so the slot is never empty. This is intentional — hard exclusions should
-        # be rare edge cases; the slot still needs to be filled.
+        # 3. Permanent exclusions — HARD.
+        #    CHANGED: excluded people are NEVER assigned. If everyone left is
+        #    excluded, we return None rather than drafting an excluded person.
+        df = df[~df["name_clean"].isin(EXCLUDED_FROM_ASSIGNMENT)]
+        if df.empty:
+            return None
 
         # 4. Minimum gap between assignments (role-aware)
         # AA: blocked within 30 days | Intermediate: 60 | Senior: 91
+        df_roles = dict(zip(df["name_clean"], df.get("role_code", pd.Series(dtype=str))))
+
         def _gap_days_for(name):
             role = df_roles.get(name, None)
             return MIN_GAP_DAYS_BY_ROLE.get(role, MIN_GAP_DAYS_DEFAULT)
 
-        df_roles = dict(zip(df["name_clean"], df.get("role_code", pd.Series(dtype=str))))
+        def _last_seen(name):
+            """Most recent assignment date for this person, considering BOTH
+            picks made during this run (keyed by name_clean) AND historical
+            assignments from previous months (keyed by lastname). Returns the
+            later of the two, or None if never assigned.
+
+            NOTE: the historical sheet also contains rows finalized for FUTURE
+            months (e.g. generating March while June is already finalized), so
+            we ignore any historical date AFTER the event date — the gap for
+            month M must only reflect assignments up to month M."""
+            run_last  = self.last_assigned.get(name)
+            hist_dates = self.last_assigned_hist.get(_extract_lastname(name), [])
+            ev = pd.Timestamp(date)
+            past_hist = [d for d in hist_dates if d <= ev]
+            hist_last = max(past_hist) if past_hist else None
+            candidates = [d for d in (run_last, hist_last) if d is not None]
+            return max(candidates) if candidates else None
 
         def _recently_assigned(name):
-            last = self.last_assigned.get(name)
+            last = _last_seen(name)
             if last is None:
                 return False
             return (date - last).days < _gap_days_for(name)
@@ -267,15 +334,14 @@ class SmartFairSelector:
             # Normal path: at least one candidate clears the gap.
             df = gap_ok
         elif hard_gap:
-            # HARD gap mode: nobody in this pool clears the gap. Do NOT pick
-            # here — signal the caller to widen to the next duty tier.
+            # HARD gap mode: nobody clears the gap. Do NOT pick here — signal
+            # the caller to widen to the next duty tier (or ultimately NONE).
             return None
         else:
-            # SOFT fallback (whole-day pool already exhausted of gap-eligible
-            # people): pick whoever was assigned LONGEST ago so we still
+            # SOFT fallback: pick whoever was assigned LONGEST ago so we still
             # respect the spirit of the gap rule as much as possible.
             def _days_since(name):
-                last = self.last_assigned.get(name)
+                last = _last_seen(name)
                 if last is None:
                     return 10**9  # never assigned → best possible
                 return (date - last).days
@@ -306,7 +372,8 @@ class SmartFairSelector:
 # RULE-BASED SELECTION
 # =========================
 
-def pick_person_fair(pep_df, date, roles, duty_priority, selector, exclude=None):
+def pick_person_fair(pep_df, date, roles, duty_priority, selector, exclude=None,
+                     prefer=None):
     """
     Step 1: filter PEP to this date + required roles
     Step 2: try each duty priority set in order
@@ -315,23 +382,29 @@ def pick_person_fair(pep_df, date, roles, duty_priority, selector, exclude=None)
     exclude: optional iterable of name_clean values that must not be picked
              (used to stop the same person filling two slots on one day).
 
-    GAP RULE — genuinely hard, with graceful widening, but NEVER escaping the
-    allowed duty codes:
+    prefer:  optional ordered list of AA types to try in sequence, e.g.
+             ["rotation", "fellow"] (PEER: rotation strongly preferred) or
+             ["fellow", "rotation"] (PHYSIO / COD_JUNIOR: fellow preferred).
+             Each type is fully attempted (all duty tiers) before moving to
+             the next. Only if NO type yields a candidate do we return None.
+             If None, AA type is ignored entirely.
+
+    GAP RULE — genuinely hard, NEVER escaping the allowed duty codes:
 
       duty_priority is the EXHAUSTIVE allow-list of assignable duties. Duty
       codes outside it (Ferien, Kongress, Wunschfrei, Besonderes, etc.) mean
-      the person is NOT available and must never be chosen — not even as a
-      last-resort fallback.
+      the person is NOT available and must never be chosen.
 
       1. Try each duty tier in priority order. Within a tier the minimum-gap
          rule is a HARD filter. If everyone in that tier is still inside their
          gap, pick() returns None and we move to the NEXT tier.
-      2. If a later tier has a gap-eligible person, they are chosen — widening
-         across the *allowed* duties before weakening the recency guarantee.
-      3. Only if NO allowed tier contains a gap-eligible candidate do we relax
-         the gap: pick whoever was assigned LONGEST ago, but STILL only from
-         the union of the allowed duty pools — never from the whole-day role
-         pool. This keeps unavailable duties (Ferien etc.) out entirely.
+      2. If a later tier has a gap-eligible person, they are chosen.
+
+    NONE-OVER-FORCE POLICY (important, changed):
+      We do NOT relax the gap as a last resort anymore. If no allowed duty
+      tier contains a gap-eligible candidate, this returns None and the slot
+      is left empty. Nobody is drafted just to fill a slot — the admin can
+      then go ask people manually.
     """
     day_df = pep_df[
         (pep_df["date"].dt.normalize() == pd.Timestamp(date).normalize()) &
@@ -353,20 +426,78 @@ def pick_person_fair(pep_df, date, roles, duty_priority, selector, exclude=None)
         # Nobody with the right role is on an assignable duty today.
         return None
 
-    # 1. + 2. Walk duty tiers in priority order; hard gap means an exhausted
-    #    tier yields None, so we automatically widen to the next tier.
-    for duty_set in duty_priority:
-        candidates = allowed_df[allowed_df["duty_code"].isin(duty_set)]
-        if candidates.empty:
-            continue
-        picked = selector.pick(candidates.copy(), date, exclude=exclude, hard_gap=True)
-        if picked is not None:
-            return picked
+    # AA-type preference tiers. None => single pass with no type filter.
+    type_tiers = list(prefer) if prefer else [None]
 
-    # 3. Last resort: every allowed tier is gap-blocked. Relax the gap and pick
-    #    the longest-ago person — but ONLY from the allowed duty pool, never
-    #    from people on Ferien/Kongress/Wunschfrei/etc.
-    return selector.pick(allowed_df.copy(), date, exclude=exclude, hard_gap=False)
+    for aa_type in type_tiers:
+        # Walk duty tiers in priority order; hard gap means an exhausted tier
+        # yields None, so we automatically widen to the next duty tier.
+        for duty_set in duty_priority:
+            candidates = allowed_df[allowed_df["duty_code"].isin(duty_set)]
+            if candidates.empty:
+                continue
+            picked = selector.pick(
+                candidates.copy(), date,
+                exclude=exclude, hard_gap=True, aa_type=aa_type,
+            )
+            if picked is not None:
+                return picked
+        # This AA type produced nobody across all duty tiers → try next type.
+
+    # No type / no tier produced a gap-eligible candidate. Leave the slot empty.
+    return None
+
+
+# =========================
+# LEADING ROLES (Kader) — Wednesday last-resort tier
+# =========================
+
+def pick_leading_role_empty_day(pep_df, date, selector, leading_roles, exclude=None):
+    """
+    Last-resort Wednesday pick for leading roles (CA / SCA / LA / SFA_I).
+
+    INVERTED PEP SEMANTICS: these people are eligible ONLY on a day where they
+    have NO PEP entry at all (no row / no duty_code). Any PEP entry that day
+    means they are AWAY (Ferien, Kongress, ...) and are NOT eligible.
+
+    Returns a name_clean, or None if nobody qualifies.
+    """
+    d = pd.Timestamp(date).normalize()
+
+    # Everyone in PEP with a leading role (across the whole frame, any date)
+    leading = pep_df[pep_df["role_code"].isin(leading_roles)].copy()
+    if leading.empty:
+        return None
+    leading["name_clean"] = leading["name_clean"].astype(str).str.strip().str.lower()
+
+    # Names that HAVE any PEP entry on this date → away → not eligible
+    has_entry_today = set(
+        pep_df.loc[pep_df["date"].dt.normalize() == d, "name_clean"]
+        .astype(str).str.strip().str.lower()
+    )
+
+    # Eligible = leading-role people with NO entry today
+    eligible_names = sorted(
+        {n for n in leading["name_clean"].unique() if n not in has_entry_today}
+    )
+    if not eligible_names:
+        return None
+
+    # Build a minimal candidate frame so the fair selector can score them.
+    # role_code is taken from their leading-role record; duty_code is a dummy
+    # (they have none today — that's the whole point).
+    role_lookup = dict(zip(leading["name_clean"], leading["role_code"]))
+    cand = pd.DataFrame({
+        "name_clean": eligible_names,
+        "role_code":  [role_lookup.get(n, "") for n in eligible_names],
+        "duty_code":  [-1] * len(eligible_names),
+    })
+
+    # Fair scoring; hard_gap=False is acceptable here because this is already
+    # the explicit last resort AND these people are rarely assigned, so the
+    # 91-day senior gap would otherwise almost always block them. We still
+    # only ever pick from genuinely-free people.
+    return selector.pick(cand, date, exclude=exclude, hard_gap=False)
 
 
 # =========================

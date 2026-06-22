@@ -39,6 +39,7 @@ from src.metadata import EVENT_METADATA
 from src.feiertage import FEIERTAGE_DATES, get_feiertag_name
 
 from src.utils_names import format_people
+from src.data_loader import merge_overrides_into_history
 
 
 # =========================
@@ -296,6 +297,7 @@ def generate_full_schedule(year, month, data):
     selector = SmartFairSelector(
         person_stats=build_person_stats(pep_df),
         history_df=get_df("history"),
+        aa_type_map=data.get("aa_registry") or {},
     )
 
     therapy   = ensure_schema(schedule_therapy(calendar))
@@ -324,7 +326,7 @@ def generate_full_schedule(year, month, data):
         )
 
     full = enrich_schedule(full)
-    # TEMP DISABLED: full = resolve_friday_conflicts(full)
+    full = resolve_friday_conflicts(full)  # Bedside Infektiologie replaces Journal Club on shared Fridays
     full = full.sort_values(["date", "time"])
     full["responsible"] = full["responsible"].apply(format_people)
 
@@ -442,11 +444,49 @@ def generate_full_schedule_aware(year, month, data):
     if cached is not None:
         return cached
 
-    # One shared selector — history seeds past load; selector accumulates
-    # current-year assignments month by month as the loop progresses.
+    # ── Load overrides and merge into history BEFORE building the selector ──
+    # Overrides represent slots the Planungsverantwortliche has already
+    # manually assigned (e.g. by email). The selector must see these as
+    # "already done" so it:
+    #   (a) doesn't assign the same person again elsewhere (fairness)
+    #   (b) doesn't count an overridden person as available for other slots
+    # merge_overrides_into_history() appends override rows as synthetic
+    # history entries, deduplicated against the real history by (date, event_type).
+    _overrides_df = data.get("overrides_df")
+    _history_with_overrides = merge_overrides_into_history(
+        get_df("history"), _overrides_df
+    )
+
+    # Build a set of (date, event_type) pairs already covered by an override
+    # so each per-month scheduler can skip those slots entirely instead of
+    # generating a conflicting algorithmic assignment that apply_overrides()
+    # would then have to patch over.
+    #
+    # _override_date_map: normalized_date -> event_type for Tuesday-type overrides.
+    # Handles the case where the override specifies a type that differs from what
+    # the algorithm computes for that date (e.g. PHYSIO on an odd-month Tuesday
+    # that the algorithm generates as PEER). tuesday.py uses this to emit a
+    # placeholder row with the override's type so apply_overrides() can match
+    # it exactly by (date, event_type) and fill in the correct responsible person.
+    _TUESDAY_TYPES = {"COD_SENIOR", "COD_JUNIOR", "PEER", "PHYSIO"}
+    _override_slots: set = set()
+    _override_date_map: dict = {}
+    if _overrides_df is not None and not _overrides_df.empty:
+        for _, _ov in _overrides_df.iterrows():
+            _ov_date = pd.to_datetime(_ov.get("event_date"), errors="coerce")
+            _ov_type = str(_ov.get("event_type", ""))
+            if pd.notna(_ov_date) and _ov_type:
+                _ov_norm = _ov_date.normalize()
+                _override_slots.add((_ov_norm, _ov_type))
+                if _ov_type in _TUESDAY_TYPES:
+                    _override_date_map[_ov_norm] = _ov_type
+
+    # One shared selector — history (+ overrides merged in) seeds past load;
+    # selector accumulates current-year assignments month by month.
     selector = SmartFairSelector(
         person_stats=build_person_stats(pep_df_raw),
-        history_df=get_df("history")
+        history_df=_history_with_overrides,
+        aa_type_map=data.get("aa_registry") or {},
     )
 
     # Sheet events are the same for every month iteration — build once.
@@ -471,9 +511,9 @@ def generate_full_schedule_aware(year, month, data):
         therapy = ensure_schema(schedule_therapy(calendar))
 
         # Algorithm events — shared selector carries memory month-to-month
-        tuesday   = ensure_schema(build_tuesday_schedule(calendar, get_df("physio"), pep_df_raw, selector, physio_topics_df=get_df("physio_topics"), already_picked_physio_nrs=_physio_picked))
-        wednesday = ensure_schema(build_wednesday_schedule(calendar, pep_df_raw, get_df("mittwoch_topics"), selector))
-        friday    = ensure_schema(build_friday_schedule(calendar, pep_df_raw, selector))
+        tuesday   = ensure_schema(build_tuesday_schedule(calendar, get_df("physio"), pep_df_raw, selector, physio_topics_df=get_df("physio_topics"), already_picked_physio_nrs=_physio_picked, override_slots=_override_slots, override_date_map=_override_date_map))
+        wednesday = ensure_schema(build_wednesday_schedule(calendar, pep_df_raw, get_df("mittwoch_topics"), selector, override_slots=_override_slots))
+        friday    = ensure_schema(build_friday_schedule(calendar, pep_df_raw, selector, override_slots=_override_slots))
 
         full = pd.concat(
             sheet_events + [therapy, tuesday, wednesday, friday],
@@ -489,7 +529,7 @@ def generate_full_schedule_aware(year, month, data):
         ].copy()
 
         full = enrich_schedule(full)
-        # TEMP DISABLED: full = resolve_friday_conflicts(full)
+        full = resolve_friday_conflicts(full)  # Bedside Infektiologie replaces Journal Club on shared Fridays
         full = full.sort_values(["date", "time"])
         full["responsible"] = full["responsible"].apply(format_people)
 
@@ -629,7 +669,7 @@ def generate_sheet_only_schedule(year, month, data):
     ].copy()
 
     full = enrich_schedule(full)
-    # TEMP DISABLED: full = resolve_friday_conflicts(full)
+    full = resolve_friday_conflicts(full)  # Bedside Infektiologie replaces Journal Club on shared Fridays
     full = full.sort_values(["date", "time"])
     full["responsible"] = full["responsible"].apply(format_people)
     full["month"] = month

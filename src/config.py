@@ -16,6 +16,25 @@ AA_ROLE           = {"AA"}
 INTERMEDIATE_ROLES = {"SOA", "OA_I", "OA_II", "SFA_II"}
 SENIOR_ROLES      = {"CA", "SCA", "LA", "SFA_I"}
 
+# =========================
+# LEADING ROLES (Kader / "wichtige Personen")
+# =========================
+# CA / SCA / LA / SFA_I. These are the SAME four roles as SENIOR_ROLES, but
+# this alias exists because they get SPECIAL handling for the Mittwoch-
+# Curriculum: they are a LAST-RESORT tier only, and only on Wednesdays where
+# their PEP row is COMPLETELY EMPTY.
+#
+# IMPORTANT — inverted PEP semantics for these people:
+#   For AA/OA, a duty_code means "present and assignable".
+#   For LEADING_ROLES it is the OPPOSITE: their PEP is normally empty, and a
+#   duty_code is only ever entered when they are AWAY (Ferien, Kongress, ...).
+#   Therefore a leading-role person is eligible ONLY on a day where they have
+#   NO PEP entry at all (no row / no duty_code). Any duty_code => unavailable.
+#
+# COD_SENIOR (Tuesday) is unaffected and continues to use SENIOR_ROLES on
+# S-Dienst exactly as before.
+LEADING_ROLES = {"CA", "SCA", "LA", "SFA_I"}
+
 
 # =========================
 # DUTY TYPES (PEP)
@@ -42,6 +61,7 @@ TAGDIENST_AA = {
     113,   # AA | Tagdienst gelb Assistenzarzt
     719,   # AA | Tagdienst Neuro IMC
     741,   # AA | Forschung AA
+    100,   # AA | B, best dienst potentially for AA  Tag 
 }
 
 # OA Tagdienst — OA pool
@@ -55,6 +75,7 @@ TAGDIENST_OA = {
 BUERO_FORSCHUNG_OA = {
     117,   # OA | Bürotag
     705,   # OA | Forschung OA
+    100,   # OA | B EKG Dienst
 }
 
 # S-Dienst — Senior pool, used for COD_SENIOR selection only.
@@ -73,7 +94,6 @@ S_DIENST = {
 # for documentation / future review — the selector excludes anything not in
 # the assignable sets, so this dict is not referenced in code.
 EXCLUDED_DUTY_CODES = {
-    100:  "Besonderes",
     103:  "Nachtdienst Oberarzt",
     123:  "Lehre",
     128:  "Tagdienst Wochenende / Feiertag Oberarzt",
@@ -103,8 +123,7 @@ EXCLUDED_DUTY_CODES = {
     3120: "Dienstalter",
     3130: "Komp. Ueberstunden",
     3136: "Komp. Zeitgutschrift OA",
-    3140: "Ruhetag",
-    3145: "freier Tag",
+    3140: "Ruhetag", 
     3150: "Wunschfrei",
 }
 
@@ -146,11 +165,7 @@ EARLIEST_ASSIGNMENT: dict = {
 # Typical use: part-time staff, on long leave, or explicitly opted out.
  
 EXCLUDED_FROM_ASSIGNMENT: set = {
-    "kyriazi maria",
-    "spitz lena-franziska", 
-    "major luca", 
     "mazyad haian",
     # Add further exclusions here:
     # "name lastname",
 }
- 

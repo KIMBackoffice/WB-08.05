@@ -16,8 +16,7 @@ from src.constants   import PLAN_YEAR, MONTH_LABELS, WEEKDAY_DE, ym_key
 from src.data_loader import save_overrides, load_overrides, apply_overrides
 from src.pipeline    import generate_full_schedule_aware, generate_sheet_only_schedule
 from src             import state
-from app             import SK
-
+from src.session_keys import SK
 # ── Event metadata ──────────────────────────────────────────────────────────
 RELEVANT_EVENTS = {
     "COD_JUNIOR", "COD_SENIOR", "PEER", "Journal_Club", "Mittwoch_Curriculum"

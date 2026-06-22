@@ -10,6 +10,10 @@ CHANGES v1.1:
       plan_export / general / aerztlich_* → see plan + export (CSV + Word)
   - Validation expander REMOVED (info is in Fairness tab)
   - Column autosize for Datum/Zeit/Ort
+
+CHANGES v1.2:
+  - Overlap warnings (room / Berufsgruppe double-booking) rendered in red
+    directly under each schedule table. Shows nothing when clean.
 """
 import datetime
 import streamlit as st
@@ -19,7 +23,9 @@ from src.constants  import WEEKDAY_DE, MONTH_MAP_WORD, get_rolling_months, ym_ke
 from src.ui         import banner, sec, show_schedule
 from src.export_docx import export_to_word
 from src.data_loader import load_overrides, apply_overrides
+from src.session_keys import SK
 from src.constants   import PLAN_YEAR
+from src.validation  import render_overlap_warnings
 from src import state as _state
 
 
@@ -80,24 +86,21 @@ Der Tab «Plan» zeigt alle Weiterbildungsveranstaltungen des kommenden 12-Monat
     # ── Aktualisieren button ──────────────────────────────────────────────────
     _, btn_col = st.columns([6, 1])
     with btn_col:
-        if st.button("↻ Aktualisieren", use_container_width=True, help="Übernahmen aus dem Zuweisung-Tab neu laden"):
+        if st.button("↻ Aktualisieren", use_container_width=True, help="Overrides neu laden und Schedule neu generieren"):
             try:
                 ov_df = load_overrides(year=PLAN_YEAR)
-                st.session_state["overrides_df"] = ov_df
+                st.session_state[SK.OVERRIDES] = ov_df
+                st.session_state["overrides_df"] = ov_df  # compat alias
             except Exception:
                 ov_df = None
-            for (y, m) in rolling:
-                k = ym_key(y, m)
-                gen_key = f"generated_{k}"
-                if gen_key in st.session_state:
-                    sc = st.session_state[gen_key]
-                    if ov_df is not None and not ov_df.empty:
-                        sc = apply_overrides(sc, ov_df, m)
-                    st.session_state[gen_key] = sc
-                    st.session_state[f"placeholder_{k}"] = sc
-                    st.session_state[f"confirm_schedule_{k}"] = sc
-                    st.session_state.pop(f"word_file_{k}", None)
-                    _state.invalidate_month(m)
+
+            # Re-inject overrides into data dict so pipeline sees them
+            data = st.session_state.get(SK.DATA) or {}
+            data["overrides_df"] = ov_df
+            st.session_state[SK.DATA] = data
+
+            # Trigger full re-generation with updated overrides
+            st.session_state[SK.AUTOLOAD] = True
             st.rerun()
 
     # ── ALL-MONTHS VIEW ────────────────────────────────────────────────────────
@@ -138,6 +141,9 @@ Der Tab «Plan» zeigt alle Weiterbildungsveranstaltungen des kommenden 12-Monat
                     "Ort":             st.column_config.TextColumn("Ort"),
                 },
             )
+            # ── Overlap warnings under the table (red text, nothing if clean) ──
+            render_overlap_warnings(combined, st)
+
             # Export only available with 3012 — 3011 sees plan only, no export
             if can_export:
                 sec("Export — Alle Monate")
@@ -177,6 +183,9 @@ Der Tab «Plan» zeigt alle Weiterbildungsveranstaltungen des kommenden 12-Monat
             banner(f"Kein PEP für {label} — Platzhalter für algorithmische Slots.", "info")
 
         show_schedule(schedule)
+
+        # ── Overlap warnings under the table (red text, nothing if clean) ──
+        render_overlap_warnings(schedule, st)
 
         # Validation REMOVED — information is available in the Fairness tab
 
@@ -220,6 +229,9 @@ Der Tab «Plan» zeigt alle Weiterbildungsveranstaltungen des kommenden 12-Monat
         else:
             banner(f"Kein PEP für {label} — Platzhalter für algorithmische Slots.", "info")
         show_schedule(st.session_state[placeholder_key])
+
+        # ── Overlap warnings under the table (red text, nothing if clean) ──
+        render_overlap_warnings(st.session_state[placeholder_key], st)
 
     else:
         st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)

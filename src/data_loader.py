@@ -1,6 +1,7 @@
 # src/data_loader.py
 
 import time
+import datetime
 import streamlit as st
 import pandas as pd
 import gspread
@@ -165,6 +166,143 @@ def load_pep_clean(url):
     df["duty_code"] = pd.to_numeric(df["duty_code"], errors="coerce")
 
     return df
+
+
+# =========================
+# AA REGISTRY (Fellow / Rotation)
+# =========================
+# A persistent sheet that maps each Assistenzarzt/ärztin (AA) to a type:
+# "fellow" or "rotation". This lets the scheduler prefer one type over the
+# other for PEER / PHYSIO / COD_JUNIOR slots (see selector.py / tuesday.py).
+#
+# WORKFLOW (fill-in-once-at-Eintritt):
+#   1. Every app run, sync_aa_registry() scans PEP for AAs.
+#   2. Any AA not yet in the registry sheet is APPENDED with a blank type
+#      and first_seen = today. Existing rows are NEVER overwritten, so your
+#      manual fellow/rotation entries are permanent.
+#   3. You fill in "fellow" / "rotation" once. Done forever.
+#
+# A BLANK type defaults to "fellow" (per admin decision).
+#
+# Sheet columns (header row, lowercase): 
+#   name_clean | first_name | last_name | assistententyp | first_seen | note
+#
+# Returns a tuple:
+#   (registry_map, newly_added_names)
+#   registry_map      : dict  name_clean(lower) -> "fellow" | "rotation"
+#   newly_added_names : list of name_clean strings appended this run (for a banner)
+
+_AA_REGISTRY_HEADER = [
+    "name_clean", "first_name", "last_name",
+    "assistententyp", "first_seen", "note",
+]
+
+# Accepted normalised type values
+_AA_TYPE_FELLOW   = "fellow"
+_AA_TYPE_ROTATION = "rotation"
+
+
+def _normalise_aa_type(raw) -> str:
+    """Map a raw cell value to 'fellow' / 'rotation'. Blank/unknown -> 'fellow'."""
+    v = str(raw or "").strip().lower()
+    if v.startswith("rot"):
+        return _AA_TYPE_ROTATION
+    if v.startswith("fel"):
+        return _AA_TYPE_FELLOW
+    # blank or anything unrecognised -> default fellow (admin decision)
+    return _AA_TYPE_FELLOW
+
+
+def sync_aa_registry(registry_url, pep_df):
+    """
+    Sync the AA registry sheet against the current PEP roster.
+
+    - Appends new AAs (blank type, first_seen=today). Never overwrites.
+    - Returns (registry_map, newly_added_names).
+
+    Fails soft: on any error returns ({}, []) so the scheduler simply falls
+    back to treating every AA as 'fellow' (the blank default) and the app
+    keeps running.
+    """
+    if not registry_url or pep_df is None or pep_df.empty:
+        return {}, []
+
+    # Distinct AAs currently in PEP: name_clean -> (first_name, last_name)
+    aa_rows = pep_df[pep_df["role_code"].astype(str).str.strip() == "AA"].copy()
+    if aa_rows.empty:
+        return {}, []
+
+    aa_rows["name_clean"] = aa_rows["name_clean"].astype(str).str.strip().str.lower()
+    pep_aas = {}
+    for _, r in aa_rows.drop_duplicates("name_clean").iterrows():
+        pep_aas[r["name_clean"]] = (
+            str(r.get("first_name", "") or "").strip(),
+            str(r.get("last_name", "") or "").strip(),
+        )
+
+    try:
+        time.sleep(_CALL_DELAY)
+        client = get_gspread_client()
+        sh     = client.open_by_url(registry_url)
+        ws     = sh.get_worksheet(0)
+
+        existing = ws.get_all_values()
+
+        # Ensure header row exists
+        if not existing:
+            ws.append_row(_AA_REGISTRY_HEADER)
+            existing = [_AA_REGISTRY_HEADER]
+
+        headers = [str(h).strip().lower() for h in existing[0]]
+
+        def _col(name, default_idx):
+            return next((i for i, h in enumerate(headers) if h == name), default_idx)
+
+        name_idx = _col("name_clean", 0)
+        type_idx = _col("assistententyp", 3)
+
+        registry_map      = {}
+        existing_names    = set()
+        for r in existing[1:]:
+            if len(r) <= name_idx:
+                continue
+            nm = str(r[name_idx]).strip().lower()
+            if not nm:
+                continue
+            existing_names.add(nm)
+            raw_type = r[type_idx] if len(r) > type_idx else ""
+            registry_map[nm] = _normalise_aa_type(raw_type)
+
+        # Append any AA from PEP not yet in the registry
+        today_str         = datetime.date.today().strftime("%d.%m.%Y")
+        newly_added       = []
+        for nm, (fn, ln) in sorted(pep_aas.items()):
+            if nm in existing_names:
+                continue
+            # Build row in sheet's header order so columns always line up
+            row_map = {
+                "name_clean":     nm,
+                "first_name":     fn,
+                "last_name":      ln,
+                "assistententyp": "",          # blank → admin fills once
+                "first_seen":     today_str,
+                "note":           "",
+            }
+            new_row = [row_map.get(h, "") for h in headers]
+            ws.append_row(new_row)
+            existing_names.add(nm)
+            newly_added.append(nm)
+            # Blank type defaults to fellow for scheduling purposes
+            registry_map[nm] = _AA_TYPE_FELLOW
+
+        if newly_added:
+            print(f"[sync_aa_registry] Appended {len(newly_added)} new AA(s): {newly_added}")
+
+        return registry_map, newly_added
+
+    except Exception as e:
+        print(f"[sync_aa_registry] Failed: {e}")
+        return {}, []
 
 
 # =========================
@@ -461,26 +599,35 @@ OVERRIDES_TAB_NAME     = "overrides"
 # =========================
 
 def _get_or_create_overrides_tab():
-    """Get the overrides worksheet, creating it + header if it doesn't exist."""
+    """
+    Get the overrides worksheet. Creates it with the correct header if missing.
+    Header: year | month | event_date | event_type | responsible | topic | note | source
+    """
     client = get_gspread_client()
     sh     = client.open_by_url(OVERRIDES_SHEET_URL)
     try:
         ws = sh.worksheet(OVERRIDES_TAB_NAME)
     except gspread.exceptions.WorksheetNotFound:
-        ws = sh.add_worksheet(title=OVERRIDES_TAB_NAME, rows=500, cols=9)
+        ws = sh.add_worksheet(title=OVERRIDES_TAB_NAME, rows=500, cols=8)
         ws.append_row([
-            "year", "month", "event_date", "event_type", "event_time",
-            "responsible", "topic", "edited_by", "edited_at"
+            "year", "month", "event_date", "event_type",
+            "responsible", "topic", "note", "source"
         ])
     return ws
 
 
 def load_overrides(year: int) -> pd.DataFrame:
     """
-    Load all override rows for a given year.
-    Returns a DataFrame with columns:
-      year, month, event_date, event_type, responsible, topic, edited_by, edited_at
-    event_date is parsed to Timestamp.
+    Load all override rows for a given year from the overrides sheet.
+
+    Expected sheet columns (row 1 = header, exact spelling):
+        year | month | event_date | event_type | responsible | topic | note | source
+
+    Returns a clean DataFrame with columns:
+        year, month, event_date (Timestamp), event_type, responsible, topic
+
+    Extra columns (note, source, comments, …) are silently ignored.
+    Missing optional columns (topic) default to empty string.
     """
     try:
         time.sleep(_CALL_DELAY)
@@ -490,97 +637,197 @@ def load_overrides(year: int) -> pd.DataFrame:
         print(f"[load_overrides] Could not read: {e}")
         return pd.DataFrame()
 
-    rows = [r for r in records if str(r.get("year", "")) == str(year)]
+    if not records:
+        return pd.DataFrame()
+
+    # Filter to requested year only
+    rows = [r for r in records if str(r.get("year", "")).strip() == str(year)]
     if not rows:
         return pd.DataFrame()
 
     df = pd.DataFrame(rows)
+
+    # Normalise column names: strip whitespace, lowercase
+    df.columns = [str(c).strip().lower() for c in df.columns]
+
+    # Required columns — bail early if missing
+    for required_col in ("event_date", "event_type", "responsible"):
+        if required_col not in df.columns:
+            print(f"[load_overrides] Missing required column '{required_col}' in override sheet")
+            return pd.DataFrame()
+
+    # Parse types
     df["event_date"] = pd.to_datetime(df["event_date"], errors="coerce", dayfirst=True)
-    df["month"]      = pd.to_numeric(df["month"], errors="coerce").fillna(0).astype(int)
-    if "event_time" not in df.columns:
-        df["event_time"] = ""
-    if "new_event_type" not in df.columns:
-        # Backwards compat: if no new_event_type column, treat as same as event_type
-        df["new_event_type"] = df["event_type"]
-    return df
+    df["month"]      = pd.to_numeric(df.get("month", pd.Series(dtype=float)),
+                                      errors="coerce").fillna(0).astype(int)
+    df["year"]       = pd.to_numeric(df.get("year",  pd.Series(dtype=float)),
+                                      errors="coerce").fillna(0).astype(int)
+
+    # Drop rows with unparseable date or missing event_type
+    df = df[df["event_date"].notna()].copy()
+    df = df[df["event_type"].astype(str).str.strip() != ""].copy()
+
+    # Ensure optional columns exist
+    if "topic"       not in df.columns: df["topic"]       = ""
+    if "responsible" not in df.columns: df["responsible"] = ""
+
+    # Clean strings
+    df["event_type"]  = df["event_type"].astype(str).str.strip()
+    df["responsible"] = df["responsible"].astype(str).str.strip()
+    df["topic"]       = df["topic"].astype(str).str.strip().replace("nan", "")
+
+    # Keep only what downstream code uses
+    keep = ["year", "month", "event_date", "event_type", "responsible", "topic"]
+    df = df[[c for c in keep if c in df.columns]].copy()
+
+    return df.reset_index(drop=True)
 
 
 def save_overrides(year: int, month: int, edits: dict, schedule: pd.DataFrame, edited_by: str = "Zuweisung"):
     """
-    Upsert override rows for each edit in the edits dict.
-    edits = { row_idx: {"responsible": "...", "topic": "..."} }
-    schedule is the current schedule DataFrame (used to look up event_date and event_type).
-    If an override for (year, month, event_date, event_type) already exists it is updated in-place;
-    otherwise a new row is appended.
+    Upsert override rows from the Zuweisung tab into the override sheet.
+
+    Sheet columns: year | month | event_date | event_type | responsible | topic | note | source
+
+    edits = { row_idx: {"responsible": "...", "topic": "...", "event_type": "..."} }
+    Matches existing rows by (year, month, event_date, event_type); updates in-place or appends.
     """
     if not edits:
         return
-
     try:
         time.sleep(_CALL_DELAY)
         ws      = _get_or_create_overrides_tab()
         now_str = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M")
 
-        # Build list of (event_date, event_type, responsible, topic) to upsert
         to_upsert = []
         for idx, changes in edits.items():
             if idx not in schedule.index:
                 continue
-            row            = schedule.loc[idx]
-            event_date     = pd.Timestamp(row["date"]).strftime("%d.%m.%Y")
-            orig_type      = str(row.get("event_type", ""))
-            # new_event_type: what the user changed it to (may differ from orig)
-            new_event_type = changes.get("event_type", orig_type)
-            event_time     = str(row.get("time", "") or "")
-            responsible    = changes.get("responsible", str(row.get("responsible", "") or ""))
-            topic          = changes.get("topic",       str(row.get("topic",       "") or ""))
-            to_upsert.append((event_date, orig_type, event_time, responsible, topic, new_event_type))
+            row        = schedule.loc[idx]
+            event_date = pd.Timestamp(row["date"]).strftime("%d.%m.%Y")
+            orig_type  = str(row.get("event_type", ""))
+            new_type   = changes.get("event_type", orig_type)
+            responsible = changes.get("responsible", str(row.get("responsible", "") or ""))
+            topic       = changes.get("topic",       str(row.get("topic",       "") or ""))
+            to_upsert.append((event_date, orig_type, new_type, responsible, topic))
 
         if not to_upsert:
             return
 
-        # Fetch records ONCE, then track in-memory which rows we've updated
-        # so that within a single save call, duplicates within the same batch
-        # are also deduplicated (key: year+month+event_date+event_type).
+        # Fetch once, build key→row-number map
+        # Sheet columns: A=year B=month C=event_date D=event_type E=responsible F=topic G=note H=source
         records = ws.get_all_records()
-        # Build a dict: key → sheet row number (1-indexed, row 1 = header)
-        existing: dict[tuple, int] = {}
+        existing: dict = {}
         for i, rec in enumerate(records, start=2):
-            # Key uses event_type (orig) not new_event_type for matching
             key = (str(rec.get("year","")), str(rec.get("month","")),
-                   str(rec.get("event_date","")), str(rec.get("event_type","")),
-                   str(rec.get("event_time","")))
+                   str(rec.get("event_date","")), str(rec.get("event_type","")))
             existing[key] = i
 
         rows_to_append = []
-        for event_date, orig_type, event_time, responsible, topic, new_event_type in to_upsert:
-            # Match key uses orig_type (what's in the schedule) so we can find & update existing rows
-            key = (str(year), str(month), event_date, orig_type, event_time)
+        for event_date, orig_type, new_type, responsible, topic in to_upsert:
+            key = (str(year), str(month), event_date, orig_type)
             if key in existing:
                 sheet_row = existing[key]
-                # Columns: year(A) month(B) event_date(C) event_type(D) event_time(E)
-                #          responsible(F) topic(G) edited_by(H) edited_at(I) new_event_type(J)
-                ws.update(f"F{sheet_row}:J{sheet_row}",
-                          [[responsible, topic, edited_by, now_str, new_event_type]])
+                # Columns E=responsible F=topic G=note H=source
+                ws.update(f"D{sheet_row}:H{sheet_row}",
+                          [[new_type, responsible, topic, now_str, edited_by]])
             else:
-                new_row = [year, month, event_date, orig_type, event_time,
-                           responsible, topic, edited_by, now_str, new_event_type]
-                rows_to_append.append(new_row)
+                rows_to_append.append([year, month, event_date, new_type,
+                                        responsible, topic, now_str, edited_by])
                 existing[key] = -1
 
-        for new_row in rows_to_append:
-            ws.append_row(new_row)
+        for row in rows_to_append:
+            ws.append_row(row)
 
     except Exception as e:
         print(f"[save_overrides] Could not write: {e}")
         raise
 
 
+def write_overrides_direct(rows: list) -> tuple[int, int]:
+    """
+    Upsert a list of override dicts directly into the overrides sheet.
+    Used by Zuweisung B — bypasses the schedule-based save_overrides() flow.
+
+    Each dict must have:
+        year, month, event_date, event_type, responsible
+    Optional:
+        topic, note, source
+
+    Upsert key: (year, month, event_date, event_type)
+    Returns: (n_updated, n_appended)
+    """
+    if not rows:
+        return 0, 0
+
+    time.sleep(_CALL_DELAY)
+    ws = _get_or_create_overrides_tab()
+
+    # Fetch existing rows once — build key → sheet row-number map
+    records = ws.get_all_records()
+    existing: dict = {}   # key → 1-based sheet row (row 1 = header, data from row 2)
+    for i, rec in enumerate(records, start=2):
+        key = (
+            str(rec.get("year",       "")).strip(),
+            str(rec.get("month",      "")).strip(),
+            str(rec.get("event_date", "")).strip(),
+            str(rec.get("event_type", "")).strip(),
+        )
+        existing[key] = i
+
+    n_updated  = 0
+    n_appended = 0
+    to_append  = []
+
+    for r in rows:
+        key = (
+            str(r.get("year",       "")).strip(),
+            str(r.get("month",      "")).strip(),
+            str(r.get("event_date", "")).strip(),
+            str(r.get("event_type", "")).strip(),
+        )
+        responsible = str(r.get("responsible", "")).strip()
+        topic       = str(r.get("topic",       "")).strip()
+        note        = str(r.get("note",        "")).strip()
+        source      = str(r.get("source",      "Zuweisung_B")).strip()
+
+        if key in existing:
+            sheet_row = existing[key]
+            # Columns: A=year B=month C=event_date D=event_type
+            #          E=responsible F=topic G=note H=source
+            ws.update(
+                f"E{sheet_row}:H{sheet_row}",
+                [[responsible, topic, note, source]],
+            )
+            n_updated += 1
+        else:
+            to_append.append([
+                r.get("year", ""), r.get("month", ""),
+                r.get("event_date", ""), r.get("event_type", ""),
+                responsible, topic, note, source,
+            ])
+            existing[key] = -1   # mark as seen so duplicates in input don't double-append
+
+    if to_append:
+        time.sleep(_CALL_DELAY)
+        ws.append_rows(to_append, value_input_option="USER_ENTERED")
+        n_appended = len(to_append)
+
+    return n_updated, n_appended
+
+
 def apply_overrides(schedule: pd.DataFrame, overrides_df: pd.DataFrame, month: int) -> pd.DataFrame:
     """
-    Apply override rows onto a schedule DataFrame.
-    Matches by event_date (normalized) + event_type.
-    Returns a new DataFrame with overrides applied.
+    Stamp override values onto a finished schedule DataFrame.
+
+    Matches each override row to the schedule by (event_date normalized, event_type).
+    Writes responsible and topic (if provided) into the matched row(s).
+    A non-match is silently skipped — the schedule stays unchanged for that slot.
+
+    Call AFTER the full schedule is assembled and sorted, just before display/export.
+    For algorithmic events the slot was already skipped during generation
+    (via override_slots in pipeline.py), so apply_overrides is the final stamp
+    that writes the correct person into the placeholder row that was left blank.
     """
     if overrides_df is None or overrides_df.empty:
         return schedule
@@ -593,29 +840,34 @@ def apply_overrides(schedule: pd.DataFrame, overrides_df: pd.DataFrame, month: i
     sc["_date_norm"] = pd.to_datetime(sc["date"], errors="coerce").dt.normalize()
 
     for _, ov in month_ov.iterrows():
-        ov_date = pd.Timestamp(ov["event_date"]).normalize() if pd.notna(ov["event_date"]) else None
-        ov_type = str(ov["event_type"])
-        if ov_date is None:
+        ov_date = pd.to_datetime(ov["event_date"], errors="coerce")
+        if pd.isna(ov_date):
             continue
-        ov_time = str(ov.get("event_time", "") or "").strip()
+        ov_date   = ov_date.normalize()
+        ov_type   = str(ov["event_type"]).strip()
+        ov_resp   = str(ov.get("responsible", "") or "").strip()
+        ov_topic  = str(ov.get("topic", "") or "").strip()
+
         mask = (sc["_date_norm"] == ov_date) & (sc["event_type"] == ov_type)
-        # If event_time is recorded, narrow to the specific time slot
-        # (handles two events of same type on same day, e.g. two Mittwoch entries)
-        if ov_time and "time" in sc.columns:
-            time_mask = mask & (sc["time"].astype(str).str.strip() == ov_time)
-            if time_mask.any():
-                mask = time_mask
         if not mask.any():
+            # Slot may not exist yet (e.g. no-PEP month — placeholder was skipped)
+            # Insert a synthetic row for this override
+            if ov_resp:
+                new_row = {
+                    "date":        ov_date,
+                    "time":        sc["time"].iloc[0] if not sc.empty else "",
+                    "event_type":  ov_type,
+                    "responsible": ov_resp,
+                    "topic":       ov_topic,
+                    "room":        "",
+                }
+                sc = pd.concat([sc, pd.DataFrame([new_row])], ignore_index=True)
             continue
-        responsible    = str(ov.get("responsible",    "") or "")
-        topic          = str(ov.get("topic",          "") or "")
-        new_event_type = str(ov.get("new_event_type", "") or "")
-        if responsible:
-            sc.loc[mask, "responsible"] = responsible
-        if topic:
-            sc.loc[mask, "topic"] = topic
-        if new_event_type and new_event_type != ov_type:
-            sc.loc[mask, "event_type"] = new_event_type
+
+        if ov_resp:
+            sc.loc[mask, "responsible"] = ov_resp
+        if ov_topic:
+            sc.loc[mask, "topic"] = ov_topic
 
     sc = sc.drop(columns=["_date_norm"])
     return sc
@@ -877,14 +1129,15 @@ def merge_overrides_into_history(history_df: pd.DataFrame,
 
     base = history_df.copy() if history_df is not None and not history_df.empty else pd.DataFrame()
 
-    # Normalize existing history dates for dedup check
+    # Normalize existing history (date, event_type) pairs for dedup check.
+    # Using (date, event_type) instead of date alone prevents incorrectly
+    # skipping overrides when two different event types fall on the same day.
     if not base.empty and "date" in base.columns:
-        existing_dates = set(
-            pd.to_datetime(base["date"], errors="coerce")
-            .dt.normalize().dropna()
-        )
+        _hist_dates = pd.to_datetime(base["date"], errors="coerce").dt.normalize()
+        _hist_types = base.get("event_type", pd.Series("", index=base.index)).astype(str)
+        existing_date_type = set(zip(_hist_dates.dropna(), _hist_types[_hist_dates.notna()]))
     else:
-        existing_dates = set()
+        existing_date_type = set()
 
     new_rows = []
     for _, ov in overrides_df.iterrows():
@@ -895,8 +1148,8 @@ def merge_overrides_into_history(history_df: pd.DataFrame,
         if pd.isna(ov_date):
             continue
         ov_date = ov_date.normalize()
-        # Skip if this date+event is already in the real history (finalized)
-        if ov_date in existing_dates:
+        # Skip if this (date, event_type) is already in the real history (finalized)
+        if (ov_date, evt_type) in existing_date_type:
             continue
 
         responsible = str(ov.get("responsible", "") or "")

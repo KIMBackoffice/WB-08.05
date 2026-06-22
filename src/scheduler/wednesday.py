@@ -6,8 +6,9 @@ from src.config import (
     SPAETDIENST,
     TAGDIENST_OA,
     BUERO_FORSCHUNG_OA,
+    LEADING_ROLES,
 )
-from src.selector import pick_person_fair
+from src.selector import pick_person_fair, pick_leading_role_empty_day
 from src.utils_names import extract_lastname as _extract_lastname
 
 
@@ -20,7 +21,8 @@ def _normalize_name_key(s: str) -> str:
             .replace('Ü', 'ue').replace('Ö', 'oe').replace('Ä', 'ae'))
 
 
-def build_wednesday_schedule(calendar_df, pep_df, topics_df, selector):
+def build_wednesday_schedule(calendar_df, pep_df, topics_df, selector,
+                             override_slots=None):
     """
     Mittwoch Curriculum — every Wednesday, 14:30–15:15
 
@@ -48,11 +50,26 @@ def build_wednesday_schedule(calendar_df, pep_df, topics_df, selector):
 
     wednesdays = calendar_df[calendar_df["weekday"] == "Wednesday"]
 
+    if override_slots is None:
+        override_slots = set()
+
     for _, row in wednesdays.iterrows():
 
         d = row["date"]
 
-        # Step 1: selector picks the person fairly
+        # Skip if already covered by a manual override
+        if (pd.Timestamp(d).normalize(), "Mittwoch_Curriculum") in override_slots:
+            events.append({
+                "date":        d,
+                "time":        "14:30-15:15",
+                "event_type":  "Mittwoch_Curriculum",
+                "responsible": None,
+                "topic":       "Mittwochscurriculum",
+                "room":        "",
+            })
+            continue
+
+        # Step 1: selector picks the person fairly (normal intermediate pool)
         responsible = pick_person_fair(
             pep_df,
             d,
@@ -60,6 +77,19 @@ def build_wednesday_schedule(calendar_df, pep_df, topics_df, selector):
             duty_priority=[SPAETDIENST, BUERO_FORSCHUNG_OA, TAGDIENST_OA],
             selector=selector,
         )
+
+        # Step 1b: LAST RESORT — if the normal pool produced nobody, allow a
+        # leading-role person (CA/SCA/LA/SFA_I), but ONLY on a Wednesday where
+        # they have NO PEP entry at all (their PEP is empty when they are
+        # present; any entry means they are away). If still nobody → None,
+        # and the slot is left empty (NONE) rather than force-filled.
+        if not responsible:
+            responsible = pick_leading_role_empty_day(
+                pep_df,
+                d,
+                selector=selector,
+                leading_roles=LEADING_ROLES,
+            )
 
         # Step 2: find their most overdue topic
         topic = _pick_topic_for_person(responsible, topic_map, d)

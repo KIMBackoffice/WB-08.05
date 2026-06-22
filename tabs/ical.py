@@ -23,9 +23,7 @@ import pandas as pd
 from src.constants import PLAN_YEAR, MONTH_LABELS, WEEKDAY_DE
 from src.ui        import banner, sec
 from src           import state
-from app           import SK
-
-
+from src.session_keys import SK
 # ── Cutoff — only export events on or after this date ─────────────────────────
 # TODO: replace with a dynamic date picker when the tool goes live.
 ICAL_START_DATE = datetime.date(2026, 4, 1)
@@ -156,7 +154,7 @@ def _collect_all_schedules() -> pd.DataFrame:
     """Concatenate all available generated schedules, filtered to ICAL_START_DATE+."""
     import datetime
     from src.constants import get_rolling_months, ym_key
-    from app import SK
+    from src.session_keys import SK
     cutoff = pd.Timestamp(ICAL_START_DATE)
     frames = []
     rolling = get_rolling_months()

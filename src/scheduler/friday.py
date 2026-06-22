@@ -14,7 +14,7 @@ from src.config import (
 # BUILD FRIDAY (JOURNAL CLUB ONLY)
 # =========================
 
-def build_friday_schedule(calendar_df, pep_df, selector):
+def build_friday_schedule(calendar_df, pep_df, selector, override_slots=None):
     """
     Journal Club
 
@@ -36,11 +36,25 @@ def build_friday_schedule(calendar_df, pep_df, selector):
 
     events = []
 
+    if override_slots is None:
+        override_slots = set()
+
     df = calendar_df[calendar_df["weekday"] == "Friday"]
 
     for _, row in df.iterrows():
 
         d = row["date"]
+
+        # Skip if already covered by a manual override
+        if (pd.Timestamp(d).normalize(), "Journal_Club") in override_slots:
+            events.append({
+                "date":        d,
+                "time":        "14:30-15:15",
+                "event_type":  "Journal_Club",
+                "responsible": None,
+                "topic":       "Journal Club",
+            })
+            continue
 
         # -------------------------
         # INTERMEDIATE (OA / SFA II)

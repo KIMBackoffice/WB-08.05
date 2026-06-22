@@ -32,7 +32,7 @@ from src.data_loader import (
     load_pflegeassistenten, load_sitzungen, load_diverse, load_fokus_intensivpflege,
     load_epic_update, load_fachentwicklung, load_history,
     load_physio_topics, get_next_physio_topic, save_physio_topic_date,
-    load_overrides, apply_overrides,
+    load_overrides, apply_overrides, sync_aa_registry,
 )
 from src.pipeline import generate_full_schedule_aware, generate_sheet_only_schedule
 
@@ -40,20 +40,7 @@ from src.pipeline import generate_full_schedule_aware, generate_sheet_only_sched
 # =========================
 # SESSION STATE KEYS
 # =========================
-class SK:
-    AUTH          = "_auth_plan"
-    AUTOLOAD      = "_trigger_autoload"
-    AUTOLOAD_DONE = "_autoload_done"
-    DATA          = "data"
-    PEP_MONTHS    = "pep_months"
-    OVERRIDES     = "overrides_df"
-
-    @staticmethod
-    def generated(ym: str) -> str:   return f"generated_{ym}"
-    @staticmethod
-    def has_pep(ym: str) -> str:     return f"has_pep_{ym}"
-    @staticmethod
-    def placeholder(ym: str) -> str: return f"placeholder_{ym}"
+from src.session_keys import SK  # moved here to avoid circular imports with tabs
 
 import tabs.plan             as tab_plan
 import tabs.analyse          as tab_analyse
@@ -62,6 +49,7 @@ import tabs.benachrichtigung as tab_ben
 import tabs.zuweisung        as tab_zuw
 import tabs.zuweisung_b      as tab_zuw_b
 import tabs.pep_upload       as tab_pep
+import tabs.testing          as tab_testing
 
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -197,6 +185,23 @@ def load_all_data():
             "Betroffene Ereignisse fehlen im Plan. API-Quota oder Berechtigungen prüfen.",
             "warn",
         )
+
+    # ── AA registry (Fellow / Rotation) ──────────────────────────────────
+    # Sync the persistent AA registry sheet against the current PEP roster:
+    # new AAs are auto-appended (blank type, filled in manually once). Returns
+    # a name→type map used by the scheduler. Fails soft (empty map → every AA
+    # treated as 'fellow'). The newly-added names are stashed in `data` so the
+    # caller can show a banner OUTSIDE this cached function.
+    aa_registry_map, aa_newly_added = {}, []
+    try:
+        registry_url = st.secrets.get("AA_REGISTRY_URL", "")
+        if registry_url:
+            aa_registry_map, aa_newly_added = sync_aa_registry(registry_url, data.get("pep"))
+    except Exception as e:
+        print(f"[load_all_data] AA registry sync failed: {e}")
+    data["aa_registry"]           = aa_registry_map
+    data["aa_registry_new_names"] = aa_newly_added
+
     return data
 
 
@@ -266,6 +271,17 @@ if st.session_state.pop(SK.AUTOLOAD, False):
     st.session_state[SK.PEP_MONTHS] = get_pep_months(_data_al)
     _pep_months_al = st.session_state[SK.PEP_MONTHS]
 
+    # New AAs auto-added to the registry → prompt admin to set Fellow/Rotation
+    _new_aas = _data_al.get("aa_registry_new_names") or []
+    if _new_aas:
+        _names = ", ".join(n.title() for n in _new_aas)
+        banner(
+            f"{len(_new_aas)} neue:r Assistenzärzt:in zur AA-Registry hinzugefügt: {_names}. "
+            "Bitte im Registry-Sheet «fellow» oder «rotation» eintragen "
+            "(bis dahin wird «fellow» angenommen).",
+            "info",
+        )
+
     _rolling = get_rolling_months()
 
     with _load_ph.container():
@@ -277,6 +293,11 @@ if st.session_state.pop(SK.AUTOLOAD, False):
     with _load_ph.container():
         doc_loader("Personal wird zugewiesen …")
 
+    # ── Load overrides BEFORE building schedules ──────────────────────────
+    # Overrides must be in _data_al so the pipeline's SmartFairSelector sees
+    # them as already-done assignments (merged into history) and the per-month
+    # schedulers skip those slots entirely (via override_slots).
+    # apply_overrides() then stamps the correct name into the skipped slot.
     try:
         _overrides_df = load_overrides(year=PLAN_YEAR)
         st.session_state[SK.OVERRIDES] = _overrides_df
@@ -285,15 +306,21 @@ if st.session_state.pop(SK.AUTOLOAD, False):
         _overrides_df = None
         st.session_state[SK.OVERRIDES] = None
 
+    # Inject into data dict so pipeline.generate_full_schedule_aware can read them
+    _data_al["overrides_df"] = _overrides_df
+
     for (_y, _m) in _rolling:
         _k = ym_key(_y, _m)
         try:
             if _m in _pep_months_al:
+                # Pipeline already uses override_slots to skip slots and
+                # merge_overrides_into_history to seed the selector.
                 _sched = generate_full_schedule_aware(_y, _m, _data_al)
                 _has   = True
             else:
                 _sched = generate_sheet_only_schedule(_y, _m, _data_al)
                 _has   = False
+            # Final stamp: write the override responsible/topic into the schedule
             if _overrides_df is not None and not _overrides_df.empty:
                 _sched = apply_overrides(_sched, _overrides_df, _m)
             st.session_state[SK.generated(_k)]   = _sched
@@ -309,7 +336,7 @@ if st.session_state.pop(SK.AUTOLOAD, False):
 
 # ── Tab dispatch ──────────────────────────────────────────────────────────────
 # ORDER v1.3: Plan → Kontrolle und Abschluss → Emails & Kalender → Fairness → Manuelle Zuweisung → Manuelle Zuweisung B → PEP Ingestion
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "Plan",
     "Kontrolle und Abschluss",
     "Emails & Kalender",
@@ -317,6 +344,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "Manuelle Zuweisung",
     "Personen Zuweisung überprüfen",
     "PEP Ingestion",
+    "Testing",
 ])
 
 with tab1:
@@ -339,6 +367,9 @@ with tab6:
 
 with tab7:
     tab_pep.render()
+
+with tab8:
+    tab_testing.render()
 
 # ── Footer ───────────────────────────────────────────────────────────────────
 st.markdown("<div style='height:180px'></div>", unsafe_allow_html=True)

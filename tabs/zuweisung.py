@@ -38,6 +38,8 @@ from src.fairness    import (
 from src.pipeline    import generate_full_schedule_aware, generate_sheet_only_schedule
 from src.scheduler.wednesday import get_topics_for_person
 from src.data_loader import load_overrides, apply_overrides, load_confirmations, save_overrides
+from src.session_keys import SK
+from src import state as _state
 
 
 # ── Event type groupings ───────────────────────────────────────────────────
@@ -435,9 +437,11 @@ def _get_dirty_rows(sc_rel: pd.DataFrame, edits: dict) -> list:
 
 def _render_override_copybox(sc_rel: pd.DataFrame, edits: dict, month: int):
     """
-    Show changed rows in a table matching the exact Override-Sheet column schema.
-    No automatic saving — user copies rows and pastes manually into the sheet.
-    Schema: year | month | event_date | event_type | responsible | topic | edited_by | edited_at | comments
+    Show changed rows and a Save button that writes them directly to the
+    Override Sheet via save_overrides(). The previous version required manual
+    copy-paste; this version saves in one click.
+
+    Schema: year | month | event_date | event_type | responsible | topic | edited_by | edited_at
     """
     if not edits:
         return
@@ -448,22 +452,10 @@ def _render_override_copybox(sc_rel: pd.DataFrame, edits: dict, month: int):
     n       = len(dirty)
     now_str = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M")
     st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
-    with st.expander(f"{n} Änderung(en) — bitte manuell ins Override-Sheet übertragen", expanded=True):
 
-        st.markdown(
-            f"<div style='font-size:12.5px;color:#555;margin-bottom:10px;line-height:1.6'>"
-            f"Kopiere die Zeilen unten und füge sie ins "
-            f"<a href='{_OVERRIDES_SHEET_URL}' target='_blank' "
-            f"style='color:#1a6e50;font-weight:600'>Override-Sheet ↗</a> ein.<br>"
-            f"<span style='font-size:11px;color:#999'>"
-            f"Spaltenreihenfolge: year · month · event_date · event_type · responsible · topic · edited_by · edited_at · comments</span>"
-            f"</div>",
-            unsafe_allow_html=True,
-        )
+    with st.expander(f"{n} Änderung(en) — bereit zum Speichern", expanded=True):
 
-        edited_by = ""  # filled manually in the sheet
-
-        # Preview table matches exact sheet columns (including comments column)
+        # Preview table
         preview = pd.DataFrame([{
             "year":        PLAN_YEAR,
             "month":       month,
@@ -471,10 +463,10 @@ def _render_override_copybox(sc_rel: pd.DataFrame, edits: dict, month: int):
             "event_type":  r["event_type"],
             "responsible": r["responsible"],
             "topic":       r["topic"],
-            "edited_by":   edited_by.strip() or "—",
+            "edited_by":   "Zuweisung",
             "edited_at":   now_str,
-            "comments":    "",
         } for r in dirty])
+
         st.dataframe(preview, use_container_width=True, hide_index=True,
             column_config={
                 "year":        st.column_config.NumberColumn("year",        width="small"),
@@ -485,17 +477,54 @@ def _render_override_copybox(sc_rel: pd.DataFrame, edits: dict, month: int):
                 "topic":       st.column_config.TextColumn("topic",         width="large"),
                 "edited_by":   st.column_config.TextColumn("edited_by",     width="small"),
                 "edited_at":   st.column_config.TextColumn("edited_at",     width="small"),
-                "comments":    st.column_config.TextColumn("comments (werden nicht übernommen)", width="medium"),
             })
 
-        st.markdown(
-            f"<div style='margin-top:8px;font-size:11.5px;color:#888'>"
-            f"💡 Tipp: Tabelle anklicken, dann Ctrl+A → Ctrl+C um alle Zeilen zu kopieren. "
-            f"Dann im <a href='{_OVERRIDES_SHEET_URL}' target='_blank' "
-            f"style='color:#1a6e50'>Override-Sheet</a> in die nächste freie Zeile einfügen."
-            f"</div>",
-            unsafe_allow_html=True,
-        )
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+        save_col, link_col = st.columns([2, 5])
+        with save_col:
+            if st.button(
+                "💾 In Override-Sheet speichern",
+                type="primary",
+                use_container_width=True,
+                key=f"zuw_save_overrides_{month}",
+            ):
+                try:
+                    save_overrides(
+                        year=PLAN_YEAR,
+                        month=month,
+                        edits={r["_row_idx"]: {
+                            "responsible": r["responsible"],
+                            "topic":       r["topic"],
+                            "event_type":  r["event_type"],
+                        } for r in dirty},
+                        schedule=sc_rel,
+                        edited_by="Zuweisung",
+                    )
+                    # Clear cached overrides and trigger full re-autoload so
+                    # the pipeline re-runs with updated overrides_df in data dict
+                    st.session_state.pop(SK.OVERRIDES, None)
+                    st.session_state.pop("overrides_df", None)
+                    st.session_state.pop(f"zuw_schedule_{month}", None)
+                    st.session_state[SK.AUTOLOAD] = True
+                    _state.invalidate_month(month)
+                    st.toast("✅ Gespeichert!", icon="✅")
+                    st.success(
+                        f"{n} Override(s) ins Sheet gespeichert. "
+                        "Beim nächsten Laden werden sie automatisch übernommen."
+                    )
+                except Exception as e:
+                    st.error(f"Fehler beim Speichern: {e}")
+
+        with link_col:
+            st.markdown(
+                f"<div style='padding-top:8px;font-size:12px;color:#888'>"
+                f"Direkt bearbeiten: "
+                f"<a href='{_OVERRIDES_SHEET_URL}' target='_blank' "
+                f"style='color:#1a6e50;font-weight:600'>Override-Sheet ↗</a>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
