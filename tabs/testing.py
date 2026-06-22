@@ -2138,11 +2138,15 @@ _SHEET_CHECKS = [
     ("fachentwicklung",   "Fachentwicklung",                  "FACHENTWICKLUNG_URL", _STD_EVENT_COLS),
     ("nds",               "NDS Fallbesprechungen",            "NDS_URL",             _STD_EVENT_COLS),
     ("ofobi",             "OFOBI",                            "OFOBI_URL",           _STD_EVENT_COLS),
+    # Kinästhetik / FPR — standard event sheet, feeds schedule_kinae_bs
+    ("kinae",             "Kinästhetik / FPR",                "KINAESTHETIK_URL",
+        ["datum", "thema"]),
     # diverse — standard cols PLUS the four zielgruppe checkbox columns
     ("diverse",           "Diverse Veranstaltungen",          "DIVERSE_URL",
         _STD_EVENT_COLS + ["für ärzte?", "für pflege?", "für studierende?", "für pflegeassistenten?"]),
-    # KimSim — split responsible (Ärzte / Pflege) + station instead of start/endzeit
-    ("kimsim",            "KimSim",                           "KINAESTHETIK_URL",
+    # KimSim — fed by SIM_URL (load_simulation), NOT KINAESTHETIK_URL.
+    # Split responsible (Ärzte / Pflege) + station instead of start/endzeit.
+    ("kimsim",            "KimSim",                           "SIM_URL",
         ["datum", "thema", "raum", "station",
          "veranwortlich - aerzte (vorname nachname)",
          "veranwortlich - pflege (vorname nachname)"]),
