@@ -2100,6 +2100,171 @@ def render_historical_simulation_ui():
 
 
 # =============================================================================
+# LIVE SHEET CHECKS (ONLINE — reads Google Sheets via data_loader)
+# =============================================================================
+# Each entry: (sheet_id, friendly_label, secret_key, required_cols)
+#   - secret_key : the st.secrets[...] entry holding the sheet URL
+#   - required_cols : columns that MUST exist after load_sheet() normalisation
+#     (load_sheet lowercases + strips headers, so list them lowercase here).
+# These checks hit live Google Sheets and are therefore NOT offline.
+# =============================================================================
+
+# Standard event-sheet columns (date + time + responsible + topic + room).
+# NOTE: the responsible column is spelled "veranwortlich" (sic) across all
+# planning sheets — the schedulers read that exact (misspelled) header, so the
+# check must require the spelling that actually has to be present.
+_STD_EVENT_COLS = [
+    "datum",
+    "startzeit",
+    "endzeit",
+    "veranwortlich (vorname nachname)",
+    "thema",
+    "raum",
+]
+
+_SHEET_CHECKS = [
+    # id,                 label,                              secret_key,            required_cols
+    ("teaching",          "Teaching Tuesday",                 "TEACHING_URL",        _STD_EVENT_COLS),
+    ("imc",               "IMC Updates",                      "IMC_URL",             _STD_EVENT_COLS),
+    ("bedside",           "Bedside Teaching Infektiologie",   "BEDSIDE_URL",         _STD_EVENT_COLS),
+    ("trauma",            "Schockraum & Trauma Board",        "TRAUMA_URL",          _STD_EVENT_COLS),
+    ("tte",               "TTE Curriculum",                   "TTE_URL",             _STD_EVENT_COLS),
+    ("masterclass",       "Masterclass",                      "MASTERCLASS_URL",     _STD_EVENT_COLS),
+    ("montagscurriculum", "Montagscurriculum",                "MONTAG_URL",          _STD_EVENT_COLS),
+    ("pflegeassistenten", "Pflegeassistenz Fortbildung",      "PA_URL",              _STD_EVENT_COLS),
+    ("sitzungen",         "Sitzungen Pflege ICU",             "SITZUNGEN_URL",       _STD_EVENT_COLS),
+    ("fokus",             "Fokus Intensivpflege",             "FOKUS_URL",           _STD_EVENT_COLS),
+    ("epic",              "EPIC Update",                      "EPIC_URL",            _STD_EVENT_COLS),
+    ("fachentwicklung",   "Fachentwicklung",                  "FACHENTWICKLUNG_URL", _STD_EVENT_COLS),
+    ("nds",               "NDS Fallbesprechungen",            "NDS_URL",             _STD_EVENT_COLS),
+    ("ofobi",             "OFOBI",                            "OFOBI_URL",           _STD_EVENT_COLS),
+    # diverse — standard cols PLUS the four zielgruppe checkbox columns
+    ("diverse",           "Diverse Veranstaltungen",          "DIVERSE_URL",
+        _STD_EVENT_COLS + ["für ärzte?", "für pflege?", "für studierende?", "für pflegeassistenten?"]),
+    # KimSim — split responsible (Ärzte / Pflege) + station instead of start/endzeit
+    ("kimsim",            "KimSim",                           "KINAESTHETIK_URL",
+        ["datum", "thema", "raum", "station",
+         "veranwortlich - aerzte (vorname nachname)",
+         "veranwortlich - pflege (vorname nachname)"]),
+    # PEP — clean roster export, entirely different schema
+    ("pep",               "PEP (Dienstplan)",                 "PEP_URL",
+        ["name_clean", "first_name", "last_name", "role_code", "date", "duty_code", "datefixed"]),
+    # Physio talk topics — minimal schema, no date column
+    ("physio_topics",     "Physio Talk Themen",               "PHYSIO_TOPICS_URL",
+        ["nr.", "artikel"]),
+]
+
+
+def _load_one_sheet(secret_key):
+    """Load a single sheet by its secret URL key using the raw load_sheet().
+    Returns the DataFrame. Raises on missing secret or any load failure so the
+    caller can mark the check FAIL."""
+    from src.data_loader import load_sheet
+
+    url = st.secrets.get(secret_key, "")
+    if not url:
+        raise RuntimeError(f"Secret '{secret_key}' fehlt oder ist leer.")
+    return load_sheet(url)
+
+
+def _check_sheet(label, required_cols, df):
+    """Run the three structural assertions against an already-loaded df.
+    Raises AssertionError with a German message on the first failure."""
+    # 1) not empty (header-only counts as empty data)
+    assert df is not None and not df.empty, \
+        f"'{label}': Sheet ist leer (keine Datenzeilen)."
+
+    # 2) all required columns present (headers already lowercased by load_sheet)
+    have = set(df.columns)
+    missing = [c for c in required_cols if c not in have]
+    assert not missing, \
+        f"'{label}': fehlende Spalten: {', '.join(missing)}"
+
+
+def render_sheet_checks():
+    """Online section: verify every configured Google Sheet exists, is
+    reachable, has all required columns, and contains data. Renders an
+    interactive head(50) per sheet in an expander."""
+    sec("Live Sheet-Checks (online)")
+    st.markdown(
+        "<p style='font-size:13px;color:var(--color-text-secondary);margin-bottom:1rem'>"
+        "⚠️ Diese Prüfungen lesen die <b>echten Google Sheets</b> über die in den Secrets "
+        "hinterlegten URLs — sie sind <b>nicht offline</b> und können je nach Anzahl der "
+        "Sheets und Google-Rate-Limits etwas dauern. Geprüft wird je Sheet: erreichbar, "
+        "alle Pflichtspalten vorhanden, mindestens eine Datenzeile.</p>",
+        unsafe_allow_html=True,
+    )
+
+    if not st.button("▶  Sheet-Checks ausführen", type="primary", key="btn_run_sheet_checks"):
+        st.info("Noch nicht gestartet. Klicke auf **▶ Sheet-Checks ausführen**.")
+        return
+
+    total  = len(_SHEET_CHECKS)
+    passed = 0
+    failed = 0
+    summary_box = st.empty()
+
+    for sheet_id, label, secret_key, required_cols in _SHEET_CHECKS:
+        t0 = time.perf_counter()
+        df = None
+        err = None
+
+        try:
+            df = _load_one_sheet(secret_key)
+            _check_sheet(label, required_cols, df)
+            status_pass = True
+        except Exception as e:
+            status_pass = False
+            err = str(e).replace("\n", " ")[:300]
+
+        elapsed = int((time.perf_counter() - t0) * 1000)
+
+        if status_pass:
+            passed += 1
+            color, bg, tag = "#155724", "#d4edda", "✅ PASS"
+        else:
+            failed += 1
+            color, bg, tag = "#721c24", "#f8d7da", "❌ FAIL"
+
+        nrows = 0 if df is None else len(df)
+        st.markdown(
+            f"<div style='padding:7px 10px;margin:3px 0;border-radius:6px;"
+            f"background:{bg};color:{color};font-size:12px'>"
+            f"<b>{tag}  [{secret_key}]</b>  {label}"
+            f"<span style='float:right;opacity:.6'>{nrows} Zeilen · {elapsed} ms</span></div>",
+            unsafe_allow_html=True,
+        )
+        if err:
+            st.markdown(
+                f"<div style='padding:5px 12px;margin:-3px 0 4px 0;"
+                f"background:#f8d7da;border-left:3px solid #c0392b;"
+                f"font-size:11px;font-family:monospace;color:#721c24'>{err}</div>",
+                unsafe_allow_html=True,
+            )
+
+        # interactive head(50) per sheet — even on failure if we got any df back
+        if df is not None and not df.empty:
+            with st.expander(f"📄 {label} — erste 50 Zeilen ({len(df)} gesamt, {len(df.columns)} Spalten)"):
+                st.caption("Spalten: " + ", ".join(map(str, df.columns)))
+                st.dataframe(df.head(50), use_container_width=True, hide_index=True)
+        elif df is not None:
+            with st.expander(f"📄 {label} — Sheet erreichbar, aber 0 Datenzeilen"):
+                st.caption("Spalten: " + ", ".join(map(str, df.columns)) if len(df.columns) else "Keine Spalten gefunden.")
+
+    with summary_box.container():
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Gesamt", total)
+        c2.metric("✅ Bestanden", passed)
+        c3.metric("❌ Fehlgeschlagen", failed)
+        st.markdown("---")
+
+    if failed == 0:
+        banner(f"✅ Alle {total} Sheet-Checks bestanden.", "ok")
+    else:
+        banner(f"❌ {failed} von {total} Sheet-Checks fehlgeschlagen. Details oben.", "err")
+
+
+# =============================================================================
 # MAIN RENDER DISPATCHER
 # =============================================================================
 
@@ -2122,7 +2287,8 @@ def render():
         sec("Automatisierte System-Tests")
         st.markdown(
             "<p style='font-size:13px;color:var(--color-text-secondary);margin-bottom:1rem'>"
-            "Alle Tests laufen offline — keine Google-Verbindung nötig.</p>",
+            "Die Unit-Tests laufen offline — keine Google-Verbindung nötig. "
+            "Die <b>Live Sheet-Checks</b> weiter unten lesen dagegen die echten Google Sheets.</p>",
             unsafe_allow_html=True
         )
 
@@ -2233,6 +2399,10 @@ def render():
                     mime="text/csv",
                     key="dl_test_failures_csv"
                 )
+
+        # ── Live Sheet-Checks (online) — separate button, runs independently ──
+        st.markdown("---")
+        render_sheet_checks()
 
     with sim_tab:
         render_historical_simulation_ui()
