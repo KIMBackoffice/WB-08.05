@@ -200,17 +200,15 @@ _AA_REGISTRY_HEADER = [
 # Accepted normalised type values
 _AA_TYPE_FELLOW   = "fellow"
 _AA_TYPE_ROTATION = "rotation"
-
+_AA_TYPE_NEURO    = "neuro"          # <-- add
 
 def _normalise_aa_type(raw) -> str:
-    """Map a raw cell value to 'fellow' / 'rotation'. Blank/unknown -> 'fellow'."""
     v = str(raw or "").strip().lower()
-    if v.startswith("rot"):
-        return _AA_TYPE_ROTATION
-    if v.startswith("fel"):
-        return _AA_TYPE_FELLOW
-    # blank or anything unrecognised -> default fellow (admin decision)
-    return _AA_TYPE_FELLOW
+    if v.startswith("rot"):   return _AA_TYPE_ROTATION
+    if v.startswith("fel"):   return _AA_TYPE_FELLOW
+    if v.startswith("neuro"): return _AA_TYPE_NEURO   # <-- add
+    return _AA_TYPE_FELLOW    # blank/unknown → fellow
+
 
 
 def sync_aa_registry(registry_url, pep_df):
