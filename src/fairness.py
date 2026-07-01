@@ -236,7 +236,7 @@ def compute_fairness_from_schedule(schedule_all, history_df=None, pep_df=None):
 # -------------------------
 
 _SPAETDIENST        = {102, 271, 166}
-_TAGDIENST_AA       = {1072, 113, 719}
+_TAGDIENST_AA       = {1072, 113, 719, 721}
 _TAGDIENST_OA       = {101, 119, 165}
 _BUERO_FORSCHUNG_OA = {117, 705}
 _INTERMEDIATE_ROLES = {"SOA", "OA_I", "OA_II", "SFA_II"}
