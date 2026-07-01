@@ -60,8 +60,9 @@ TAGDIENST_AA = {
     1072,  # AA | Tagdienst Blau Assistenzarzt
     113,   # AA | Tagdienst gelb Assistenzarzt
     719,   # AA | Tagdienst Neuro IMC
+    721,   # AA | Tagdienst Zone IMC Viszeral
     741,   # AA | Forschung AA
-    100,   # AA | B, best dienst potentially for AA  Tag 
+    100,   # AA | B, best dienst potentially for AA  Tag
 }
 
 # OA Tagdienst — OA pool
@@ -108,7 +109,6 @@ EXCLUDED_DUTY_CODES = {
     369:  "Hochzeit",
     374:  "Auswärtige Sitzung",
     387:  "Kongress OA",
-    721:  "Tagdienst Zone IMC Viszeral", # excluded per decision
     802:  "Wunsch kein Dienst",
     826:  "Einführung",
     827:  "Betriebsleitung",
