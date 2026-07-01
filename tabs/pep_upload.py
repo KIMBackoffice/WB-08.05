@@ -101,6 +101,7 @@ DUTY_CODES = {
     3150: "Wunschfrei",
     741: "Forschung AA",
     827: "Betriebsleitung",
+    721: "Tagdienst Zone IMC Viszeral",
 }
 
 VALID_ROLES = {"CA", "SCA", "LA", "SFA_I", "SFA_II", "OA_I", "OA_II", "SOA", "AA"}
