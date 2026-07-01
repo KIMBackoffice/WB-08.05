@@ -39,7 +39,7 @@ _GREY   = "EDEDED"   # Folienhintergrund
 _WHITE  = "FFFFFF"
 _BLACK  = "1A1A1A"
 
-_WHITE_TEXT_CARDS = {_GREEN}          # gruene Karte -> weisser Text; sonst schwarz
+_WHITE_TEXT_CARDS: set = set()        # Referenz: schwarzer Text auf ALLEN Karten (auch grün)
 
 
 def _text_color(bg_hex: str) -> str:
