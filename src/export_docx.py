@@ -671,6 +671,11 @@ def export_to_word(schedule_df, template_path, month_label):
         if el.text and "MONTH" in el.text:
             el.text = el.text.replace("MONTH", month_label)
 
+    # --- Verteiler: Hubert Kössler aus dem externen Verteiler entfernen ---
+    for el in doc_root.iter(_tag("w", "t")):
+        if el.text and "hubert.koessler@insel.ch" in el.text:
+            el.text = el.text.replace("hubert.koessler@insel.ch; ", "")
+
     # --- find the single table ---
     body = doc_root.find(_tag("w", "body"))
     tbl  = body.find(_tag("w", "tbl"))
@@ -679,6 +684,14 @@ def export_to_word(schedule_df, template_path, month_label):
     rows = tbl.findall(_tag("w", "tr"))
     for row in rows[1:]:
         tbl.remove(row)
+
+    # Kopfzeile: graue Titelzeile auf jeder Seite wiederholen (<w:tblHeader/>)
+    header_trPr = rows[0].find(_tag("w", "trPr"))
+    if header_trPr is None:
+        header_trPr = etree.Element(_tag("w", "trPr"))
+        rows[0].insert(0, header_trPr)          # trPr muss erstes Kind von <w:tr> sein
+    if header_trPr.find(_tag("w", "tblHeader")) is None:
+        header_trPr.insert(0, etree.Element(_tag("w", "tblHeader")))
 
     # --- append data rows ---
     for _, row in schedule_df.iterrows():
@@ -733,38 +746,45 @@ def export_to_word(schedule_df, template_path, month_label):
     new_doc_xml = etree.tostring(doc_root, xml_declaration=True,
                                  encoding="UTF-8", standalone=True)
 
-    # --- fix footer: remove the hard-coded "2/2" paragraph if present ---
-    # The template footer already has Inselspital + Verantwortlich lines.
-    # The old code wrote a plain "2/2" paragraph; we strip any paragraph
-    # that contains only digits and "/" (e.g. "2/2", "1/3") from footer.
-    footer_name = None
-    new_footer_xml = None
+    # --- Fusszeile: ALLE Fusszeilen korrigieren -------------------------
+    # Die Vorlage hat eine Erst-Seiten-Fusszeile und eine Standard-Fusszeile,
+    # darum muss jede Fusszeile behandelt werden (die alte Version hat nach der
+    # ersten mit "break" aufgehört, deshalb blieb der Tippfehler ab Seite 2).
+    #   1) Schreibfehler "Klinikadminstration" -> "Klinikadministration"
+    #   2) reine Seitenangabe-Absaetze wie "2/2" entfernen
+    fixed_footers = {}
     for name in all_names:
-        if name.startswith("word/footer") and name.endswith(".xml"):
-            footer_name = name
-            raw = file_contents[name]
-            ft_root = etree.fromstring(raw)
-            # Remove paragraphs whose full text is purely a page fraction like "2/2"
-            for p in ft_root.findall(".//" + _tag("w", "p")):
-                texts = "".join(
-                    t.text or ""
-                    for t in p.findall(".//" + _tag("w", "t"))
-                ).strip()
-                if re.match(r"^\d+/\d+$", texts):
-                    parent = p.getparent()
-                    if parent is not None:
-                        parent.remove(p)
-            new_footer_xml = etree.tostring(ft_root, xml_declaration=True,
-                                            encoding="UTF-8", standalone=True)
-            break   # only one footer to fix
+        if not (name.startswith("word/footer") and name.endswith(".xml")):
+            continue
+        ft_root = etree.fromstring(file_contents[name])
+
+        # (1) Tippfehler in jedem Run korrigieren
+        for t_el in ft_root.iter(_tag("w", "t")):
+            if t_el.text and "Klinikadminstration" in t_el.text:
+                t_el.text = t_el.text.replace("Klinikadminstration",
+                                              "Klinikadministration")
+
+        # (2) Absaetze entfernen, deren gesamter Text nur "2/2" o. ae. ist
+        for p in ft_root.findall(".//" + _tag("w", "p")):
+            texts = "".join(
+                t.text or ""
+                for t in p.findall(".//" + _tag("w", "t"))
+            ).strip()
+            if re.match(r"^\d+/\d+$", texts):
+                parent = p.getparent()
+                if parent is not None:
+                    parent.remove(p)
+
+        fixed_footers[name] = etree.tostring(ft_root, xml_declaration=True,
+                                             encoding="UTF-8", standalone=True)
 
     # --- write back into the zip ---
     with zipfile.ZipFile(filename, "w", zipfile.ZIP_DEFLATED) as zf:
         for name in all_names:
             if name == "word/document.xml":
                 zf.writestr(name, new_doc_xml)
-            elif footer_name and name == footer_name and new_footer_xml:
-                zf.writestr(name, new_footer_xml)
+            elif name in fixed_footers:
+                zf.writestr(name, fixed_footers[name])
             else:
                 zf.writestr(name, file_contents[name])
 
