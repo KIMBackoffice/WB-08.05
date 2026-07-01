@@ -816,18 +816,42 @@ def write_overrides_direct(rows: list) -> tuple[int, int]:
     return n_updated, n_appended
 
 
+# Tuesday 11:30 rotation family. COD_SENIOR / COD_JUNIOR / PEER / PHYSIO all
+# occupy the SAME physical Tuesday slot, so an override carrying one of these
+# types should replace whatever rotation type the algorithm generated for that
+# date (rather than leaving a name-less row and appending a duplicate).
+_TUESDAY_ROTATION_TYPES = {"COD_SENIOR", "COD_JUNIOR", "PEER", "PHYSIO"}
+
+# Default topic per Tuesday rotation type, used when an override switches the
+# type of a slot but brings no topic of its own.
+_TUESDAY_TOPIC_DEFAULTS = {
+    "PHYSIO":     "Physio Talk",
+    "PEER":       "Peer-Teaching Session",
+    "COD_JUNIOR": "Case of the Day (COD)",
+    "COD_SENIOR": "S - Case of the Day (COD)",
+}
+
+
 def apply_overrides(schedule: pd.DataFrame, overrides_df: pd.DataFrame, month: int) -> pd.DataFrame:
     """
     Stamp override values onto a finished schedule DataFrame.
 
-    Matches each override row to the schedule by (event_date normalized, event_type).
-    Writes responsible and topic (if provided) into the matched row(s).
-    A non-match is silently skipped — the schedule stays unchanged for that slot.
+    Matching (per override row), in order:
+      1. Exact match on (event_date normalized, event_type) -> write
+         responsible / topic into that row.
+      2. No exact match, but the override's type is a Tuesday rotation type
+         (COD_SENIOR / COD_JUNIOR / PEER / PHYSIO): the override REPLACES the
+         Tuesday slot the algorithm rotated in for that date (same 11:30 slot) -
+         its event_type, topic and responsible get overwritten. This makes e.g.
+         a PHYSIO override win over an algorithmic PEER slot, instead of leaving
+         a name-less PEER row AND appending a duplicate PHYSIO row.
+      3. Still nothing: the slot genuinely does not exist yet -> append ONE
+         clean row (Tuesday types get 11:30-11:45 / INO E218; others blank).
 
-    Call AFTER the full schedule is assembled and sorted, just before display/export.
-    For algorithmic events the slot was already skipped during generation
-    (via override_slots in pipeline.py), so apply_overrides is the final stamp
-    that writes the correct person into the placeholder row that was left blank.
+    A non-match with no responsible is silently skipped.
+
+    Call AFTER the full schedule is assembled and sorted, just before
+    display/export. The result is re-sorted by (date, time).
     """
     if overrides_df is None or overrides_df.empty:
         return schedule
@@ -840,7 +864,7 @@ def apply_overrides(schedule: pd.DataFrame, overrides_df: pd.DataFrame, month: i
     sc["_date_norm"] = pd.to_datetime(sc["date"], errors="coerce").dt.normalize()
 
     for _, ov in month_ov.iterrows():
-        ov_date = pd.to_datetime(ov["event_date"], errors="coerce")
+        ov_date = pd.to_datetime(ov["event_date"], errors="coerce", dayfirst=True)
         if pd.isna(ov_date):
             continue
         ov_date   = ov_date.normalize()
@@ -848,29 +872,51 @@ def apply_overrides(schedule: pd.DataFrame, overrides_df: pd.DataFrame, month: i
         ov_resp   = str(ov.get("responsible", "") or "").strip()
         ov_topic  = str(ov.get("topic", "") or "").strip()
 
+        # 1) exact match on (date, event_type)
         mask = (sc["_date_norm"] == ov_date) & (sc["event_type"] == ov_type)
+
+        # 2) no exact match, but override is a Tuesday-rotation type:
+        #    replace the Tuesday slot the algorithm produced for that date.
+        if not mask.any() and ov_type in _TUESDAY_ROTATION_TYPES:
+            fam = (
+                (sc["_date_norm"] == ov_date)
+                & (sc["event_type"].isin(_TUESDAY_ROTATION_TYPES))
+            )
+            if fam.any():
+                sc.loc[fam, "event_type"] = ov_type
+                sc.loc[fam, "topic"] = (
+                    ov_topic or _TUESDAY_TOPIC_DEFAULTS.get(ov_type, "")
+                )
+                if ov_resp:
+                    sc.loc[fam, "responsible"] = ov_resp
+                continue
+
+        # 3) genuinely missing slot -> append one clean row
         if not mask.any():
-            # Slot may not exist yet (e.g. no-PEP month — placeholder was skipped)
-            # Insert a synthetic row for this override
             if ov_resp:
+                if ov_type in _TUESDAY_ROTATION_TYPES:
+                    new_time, new_room = "11:30-11:45", "INO E218"
+                else:
+                    new_time, new_room = "", ""
                 new_row = {
                     "date":        ov_date,
-                    "time":        sc["time"].iloc[0] if not sc.empty else "",
+                    "time":        new_time,
                     "event_type":  ov_type,
                     "responsible": ov_resp,
-                    "topic":       ov_topic,
-                    "room":        "",
+                    "topic":       ov_topic or _TUESDAY_TOPIC_DEFAULTS.get(ov_type, ""),
+                    "room":        new_room,
                 }
                 sc = pd.concat([sc, pd.DataFrame([new_row])], ignore_index=True)
             continue
 
+        # 4) exact match -> stamp responsible / topic
         if ov_resp:
             sc.loc[mask, "responsible"] = ov_resp
         if ov_topic:
             sc.loc[mask, "topic"] = ov_topic
 
     sc = sc.drop(columns=["_date_norm"])
-    return sc
+    return sc.sort_values(["date", "time"]).reset_index(drop=True)
 
 
 def _get_or_create_confirmation_tab():
