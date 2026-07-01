@@ -147,12 +147,15 @@ def build_tuesday_schedule(calendar_df, physio_df, pep_df, selector,
             )
         else:
             # AA slots: TAGDIENST_AA only.
-            # AA-type preference:
-            #   PEER       → rotation strongly preferred, fellow as fallback
-            #   PHYSIO     → fellow preferred, rotation as fallback
-            #   COD_JUNIOR → fellow preferred, rotation as fallback
+            # AA-type preference (tiers tried in order; a set = one pooled tier
+            # whose members compete EQUALLY on fairness):
+            #   PEER       → rotation & neuro rank equally; fellow only fallback
+            #   PHYSIO     → fellow preferred, rotation fallback (no neuro)
+            #   COD_JUNIOR → fellow preferred, rotation fallback (no neuro)
+            # neuro AAs are opt-in: they appear only where 'neuro' is listed,
+            # i.e. PEER. PHYSIO/COD never list it, so neuro is excluded there.
             if subtype == "PEER":
-                aa_prefer = ["rotation", "fellow"]
+                aa_prefer = [{"rotation", "neuro"}, "fellow"]
             else:  # PHYSIO, COD_JUNIOR
                 aa_prefer = ["fellow", "rotation"]
 
