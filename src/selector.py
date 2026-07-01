@@ -62,9 +62,9 @@ class SmartFairSelector:
         self.last_assigned_hist = {}
         self.month_assignments = {}
         self.person_stats      = person_stats or {}
-        # name_clean(lower) -> "fellow" | "rotation". Blank/unknown AAs default
-        # to "fellow" at lookup time via aa_type_of(). Empty dict => every AA
-        # is treated as "fellow".
+        # name_clean(lower) -> "fellow" | "rotation" | "neuro". Blank/unknown
+        # AAs default to "fellow" at lookup time via aa_type_of(). Empty dict
+        # => every AA is treated as "fellow".
         self.aa_type_map       = {
             str(k).strip().lower(): str(v).strip().lower()
             for k, v in (aa_type_map or {}).items()
@@ -219,12 +219,14 @@ class SmartFairSelector:
         return months_since < 2
 
     # =========================
-    # AA TYPE (Fellow / Rotation)
+    # AA TYPE (Fellow / Rotation / Neuro)
     # =========================
     def aa_type_of(self, name) -> str:
         """
-        Return 'fellow' or 'rotation' for a given AA name_clean.
+        Return 'fellow', 'rotation' or 'neuro' for a given AA name_clean.
         Unknown / blank / not-in-registry defaults to 'fellow' (admin decision).
+        The value is passed straight through from the registry via
+        data_loader._normalise_aa_type, so any type it emits is honoured here.
         """
         return self.aa_type_map.get(str(name).strip().lower(), "fellow")
 
@@ -244,9 +246,15 @@ class SmartFairSelector:
                          assigned LONGEST ago (never raw score on a recently-
                          used person). Used only as a deliberate soft fallback.
 
-        aa_type        → if set ('fellow' or 'rotation'), restricts candidates
-                         to AAs of that type. If nobody matches, returns None
-                         so the caller can try the other type.
+        aa_type        → restricts the candidate pool by AA type. May be:
+                           - a single type string ('fellow'/'rotation'/'neuro')
+                           - an iterable of types, pooled into ONE tier (all
+                             listed types compete together on fairness)
+                           - None → no type requested: 'neuro' is dropped
+                             (opt-in only) and 'fellow'+'rotation' compete
+                             together, exactly as before.
+                         If a requested type/group matches nobody, returns None
+                         so the caller can try the next preferred tier.
 
         NONE-OVER-FORCE POLICY (important):
           We never "draft a warm body". If no candidate survives the mandatory
@@ -270,12 +278,29 @@ class SmartFairSelector:
             if not filtered.empty:
                 df = filtered
 
-        # 0b. AA-TYPE filter (Fellow / Rotation) — HARD. If no candidate of the
-        #     requested type exists, return None so the caller falls back to
-        #     the other type.
+        # 0b. AA-TYPE filter — HARD.
+        #     aa_type may be:
+        #       • a single type string ('fellow' / 'rotation' / 'neuro')
+        #       • an iterable of types → treated as ONE pooled tier, so
+        #         candidates of ANY listed type compete together on fairness
+        #         (this is how PEER treats rotation + neuro as equally good)
+        #       • None → no type requested: drop 'neuro' (opt-in only) and let
+        #         'fellow' + 'rotation' compete together, exactly as before.
+        #     Neuro AAs are OPT-IN: they appear only when a tier explicitly
+        #     lists 'neuro'. Every other AA event (e.g. Journal Club, which
+        #     passes no prefer) leaves them out via the None branch below.
+        #     If a requested type/group matches nobody, return None so the
+        #     caller falls back to the next preferred tier.
         if aa_type is not None:
-            want = str(aa_type).strip().lower()
-            df = df[df["name_clean"].apply(lambda n: self.aa_type_of(n) == want)]
+            if isinstance(aa_type, str):
+                want = {aa_type.strip().lower()}
+            else:
+                want = {str(t).strip().lower() for t in aa_type}
+            df = df[df["name_clean"].apply(lambda n: self.aa_type_of(n) in want)]
+            if df.empty:
+                return None
+        else:
+            df = df[df["name_clean"].apply(lambda n: self.aa_type_of(n) != "neuro")]
             if df.empty:
                 return None
 
@@ -382,12 +407,17 @@ def pick_person_fair(pep_df, date, roles, duty_priority, selector, exclude=None,
     exclude: optional iterable of name_clean values that must not be picked
              (used to stop the same person filling two slots on one day).
 
-    prefer:  optional ordered list of AA types to try in sequence, e.g.
-             ["rotation", "fellow"] (PEER: rotation strongly preferred) or
-             ["fellow", "rotation"] (PHYSIO / COD_JUNIOR: fellow preferred).
-             Each type is fully attempted (all duty tiers) before moving to
-             the next. Only if NO type yields a candidate do we return None.
-             If None, AA type is ignored entirely.
+    prefer:  optional ordered list of AA-type tiers, tried in sequence. Each
+             tier may be a single type string OR a set/list of types that are
+             pooled together (competing on fairness within that tier). Examples:
+               [{"rotation", "neuro"}, "fellow"]  (PEER: rotation & neuro rank
+                   EQUALLY, fellow only as fallback)
+               ["fellow", "rotation"]             (PHYSIO / COD_JUNIOR: fellow
+                   preferred; neuro never listed, so it is excluded)
+             Each tier is fully attempted (all duty tiers) before moving to the
+             next. Only if NO tier yields a candidate do we return None. If
+             prefer is None, no type is requested and 'neuro' AAs are excluded
+             (opt-in only); 'fellow' + 'rotation' compete together.
 
     GAP RULE — genuinely hard, NEVER escaping the allowed duty codes:
 
@@ -426,7 +456,8 @@ def pick_person_fair(pep_df, date, roles, duty_priority, selector, exclude=None,
         # Nobody with the right role is on an assignable duty today.
         return None
 
-    # AA-type preference tiers. None => single pass with no type filter.
+    # AA-type preference tiers. None => single pass with aa_type=None, which
+    # excludes 'neuro' (opt-in only) and lets fellow + rotation compete.
     type_tiers = list(prefer) if prefer else [None]
 
     for aa_type in type_tiers:
