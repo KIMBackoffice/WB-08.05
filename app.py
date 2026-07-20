@@ -34,7 +34,7 @@ from src.data_loader import (
     load_physio_topics, get_next_physio_topic, save_physio_topic_date,
     load_overrides, apply_overrides, sync_aa_registry,
 )
-from src.pipeline import generate_full_schedule_aware, generate_sheet_only_schedule
+from src.pipeline import generate_full_schedule_aware, generate_sheet_only_schedule, clear_aware_cache
 
 
 # =========================
@@ -266,6 +266,7 @@ if st.session_state.pop(SK.AUTOLOAD, False):
         doc_loader("Planungsdaten aus Sheets werden geladen …")
     st.cache_data.clear()
     clear_alternatives_cache()
+    clear_aware_cache()
     _data_al = load_all_data()
     st.session_state[SK.DATA]      = _data_al
     st.session_state[SK.PEP_MONTHS] = get_pep_months(_data_al)
