@@ -377,6 +377,16 @@ def _store_aware_cache(year, all_pep_months, data, computed_months):
     _AWARE_CACHE[sig] = computed_months
 
 
+def clear_aware_cache():
+    """Wipe the in-process warm-pass cache so the next schedule generation
+    rebuilds from freshly loaded sheet data. Call this on every manual
+    'Aktualisieren' / autoload, alongside st.cache_data.clear() and
+    clear_alternatives_cache(). Without it, edits to any sheet other than
+    PEP/History are masked until a full app restart, because the cache
+    signature only hashes PEP and History."""
+    _AWARE_CACHE.clear()
+
+
 def generate_full_schedule_aware(year, month, data):
     """
     Generate the schedule for a single month using a shared selector that
