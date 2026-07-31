@@ -40,7 +40,8 @@ EVENT_ZIELGRUPPE = {
     # =========================
     # PFLEGE — P / S / (A)
     # =========================
-    "Montagscurriculum":    ["P", "S", "A"], # montagscurriculum.py → Montagscurriculum
+    # A entfernt auf Wunsch Doris (07/2026): WB primär für Pflege + NDS-Studierende
+    "Montagscurriculum":    ["P", "S"], # montagscurriculum.py → Montagscurriculum
 
     # =========================
     # MIXED — A / P
