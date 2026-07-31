@@ -14,6 +14,13 @@ CHANGES v1.1:
 CHANGES v1.2:
   - Overlap warnings (room / Berufsgruppe double-booking) rendered in red
     directly under each schedule table. Shows nothing when clean.
+
+CHANGES v1.3:
+  - Export split into two groups:
+      Export                    → CSV + Word (Monatsplan, Verteiler)
+      Für Klinikadministration  → Slides (Monitore) + TN-Listen
+  - New: TN-Listen (Teilnehmerlisten, eine Seite pro Veranstaltung),
+    see src/export_tn_liste.py
 """
 import datetime
 import streamlit as st
@@ -148,79 +155,6 @@ Der Tab «Plan» zeigt alle Weiterbildungsveranstaltungen des kommenden 12-Monat
 
             # Export only available with 3012 — 3011 sees plan only, no export
             if can_export:
-              sec("Export")
-              dc, wc, _ = st.columns([1.3, 1.3, 5.4])
-              with dc:
-                  csv = schedule.to_csv(index=False).encode("utf-8")
-                  st.download_button(
-                      "↓  CSV", csv,
-                      file_name=f"weiterbildungsplan_{k}.csv",
-                      mime="text/csv",
-                      use_container_width=True,
-                  )
-              with wc:
-                  word_key = f"word_file_{k}"
-                  if word_key not in st.session_state:
-                      with st.spinner("Word wird erstellt …"):
-                          file_path = export_to_word(
-                              schedule,
-                              template_path="src/Bildung_Vorlage_ICU_month.docx",
-                              month_label=ym_label_word(sel_y, sel_m),
-                          )
-                      st.session_state[word_key] = file_path
-                  with open(st.session_state[word_key], "rb") as f:
-                      st.download_button(
-                          "↓  Word", f,
-                          file_name=st.session_state[word_key].split("/")[-1],
-                          mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                          use_container_width=True,
-                          help="Monatsplan als Word-Dokument (Verteiler)",
-                      )
-  
-              sec("Für Klinikadministration")
-              pc, tc, _ = st.columns([1.3, 1.6, 5.1])
-              with pc:
-                  pptx_key = f"pptx_file_{k}"
-                  try:
-                      if pptx_key not in st.session_state:
-                          with st.spinner("Slides werden erstellt …"):
-                              st.session_state[pptx_key] = export_to_pptx(
-                                  schedule, month=sel_m, year=sel_y,
-                              )
-                      with open(st.session_state[pptx_key], "rb") as f:
-                          st.download_button(
-                              "↓  Slides", f,
-                              file_name=st.session_state[pptx_key].split("/")[-1],
-                              mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                              use_container_width=True,
-                              help="Präsentation für die Monitore (Pausenräume)",
-                          )
-                  except Exception as _pe:
-                      st.caption(f"Slides: {_pe}")
-              with tc:
-                  tn_key = f"tn_file_{k}"
-                  try:
-                      if tn_key not in st.session_state:
-                          with st.spinner("TN-Listen werden erstellt …"):
-                              st.session_state[tn_key] = export_tn_listen(
-                                  schedule, month=sel_m, year=sel_y,
-                                  template_path="src/TN_Liste_Vorlage.docx",
-                              )
-                      with open(st.session_state[tn_key], "rb") as f:
-                          st.download_button(
-                              "↓  TN-Listen", f,
-                              file_name=st.session_state[tn_key].split("/")[-1],
-                              mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                              use_container_width=True,
-                              help="Eine Teilnehmerliste pro Veranstaltung des Monats",
-                          )
-                  except Exception as _te:
-                      st.caption(f"TN-Listen: {_te}")
-  
-  
-  
-            
-            if can_export:
                 sec("Export — Alle Monate")
                 dc2, _, __ = st.columns([1.3, 1.3, 5])
                 with dc2:
@@ -267,7 +201,7 @@ Der Tab «Plan» zeigt alle Weiterbildungsveranstaltungen des kommenden 12-Monat
         # Export section only shown to 3012 users — 3011 view-only sees nothing here
         if can_export:
             sec("Export")
-            dc, wc, pc, _ = st.columns([1.3, 1.3, 1.3, 5])
+            dc, wc, _ = st.columns([1.3, 1.3, 5.4])
             with dc:
                 csv = schedule.to_csv(index=False).encode("utf-8")
                 st.download_button(
@@ -289,10 +223,14 @@ Der Tab «Plan» zeigt alle Weiterbildungsveranstaltungen des kommenden 12-Monat
                 with open(st.session_state[word_key], "rb") as f:
                     st.download_button(
                         "↓  Word", f,
-                        file_name=st.session_state[word_key],
+                        file_name=st.session_state[word_key].split("/")[-1],
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                         use_container_width=True,
+                        help="Monatsplan als Word-Dokument (Verteiler)",
                     )
+
+            sec("Für Klinikadministration")
+            pc, tc, _ = st.columns([1.3, 1.6, 5.1])
             with pc:
                 pptx_key = f"pptx_file_{k}"
                 try:
@@ -307,9 +245,29 @@ Der Tab «Plan» zeigt alle Weiterbildungsveranstaltungen des kommenden 12-Monat
                             file_name=st.session_state[pptx_key].split("/")[-1],
                             mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                             use_container_width=True,
+                            help="Präsentation für die Monitore (Pausenräume)",
                         )
                 except Exception as _pe:
                     st.caption(f"Slides: {_pe}")
+            with tc:
+                tn_key = f"tn_file_{k}"
+                try:
+                    if tn_key not in st.session_state:
+                        with st.spinner("TN-Listen werden erstellt …"):
+                            st.session_state[tn_key] = export_tn_listen(
+                                schedule, month=sel_m, year=sel_y,
+                                template_path="src/TN_Liste_Vorlage.docx",
+                            )
+                    with open(st.session_state[tn_key], "rb") as f:
+                        st.download_button(
+                            "↓  TN-Listen", f,
+                            file_name=st.session_state[tn_key].split("/")[-1],
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            use_container_width=True,
+                            help="Eine Teilnehmerliste pro Veranstaltung des Monats",
+                        )
+                except Exception as _te:
+                    st.caption(f"TN-Listen: {_te}")
 
     elif placeholder_key in st.session_state:
         sec("Plan")
