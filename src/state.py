@@ -107,6 +107,9 @@ def invalidate_month(month: int):
     st.session_state.pop("schedule_all_months",       None)
     st.session_state.pop(f"notify_schedule_{month}",  None)
     st.session_state.pop(f"word_file_{month}",        None)
+    st.session_state.pop(f"word_file_{month}",        None)
+    st.session_state.pop(f"pptx_file_{month}",        None)
+    st.session_state.pop(f"tn_file_{month}",          None)
 
 def invalidate_all():
     """Full reset — called on fresh data load."""
@@ -114,6 +117,8 @@ def invalidate_all():
         k.startswith(p) for p in (
             "generated_", "has_pep_", "placeholder_", "confirm_schedule_",
             "pending_edits_", "notify_schedule_", "word_file_",
+            "schedule_all", "pep_norm", "pending_edits_", "notify_schedule_", "word_file_",
+            "pptx_file_", "tn_file_",
             "schedule_all", "pep_norm",
         )
     )]
