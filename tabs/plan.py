@@ -23,6 +23,7 @@ from src.constants  import WEEKDAY_DE, MONTH_MAP_WORD, get_rolling_months, ym_ke
 from src.ui         import banner, sec, show_schedule
 from src.export_docx import export_to_word
 from src.export_pptx import export_to_pptx
+from src.export_tn_liste import export_tn_listen
 from src.data_loader import load_overrides, apply_overrides
 from src.session_keys import SK
 from src.constants   import PLAN_YEAR
@@ -146,6 +147,79 @@ Der Tab «Plan» zeigt alle Weiterbildungsveranstaltungen des kommenden 12-Monat
             render_overlap_warnings(combined, st)
 
             # Export only available with 3012 — 3011 sees plan only, no export
+            if can_export:
+              sec("Export")
+              dc, wc, _ = st.columns([1.3, 1.3, 5.4])
+              with dc:
+                  csv = schedule.to_csv(index=False).encode("utf-8")
+                  st.download_button(
+                      "↓  CSV", csv,
+                      file_name=f"weiterbildungsplan_{k}.csv",
+                      mime="text/csv",
+                      use_container_width=True,
+                  )
+              with wc:
+                  word_key = f"word_file_{k}"
+                  if word_key not in st.session_state:
+                      with st.spinner("Word wird erstellt …"):
+                          file_path = export_to_word(
+                              schedule,
+                              template_path="src/Bildung_Vorlage_ICU_month.docx",
+                              month_label=ym_label_word(sel_y, sel_m),
+                          )
+                      st.session_state[word_key] = file_path
+                  with open(st.session_state[word_key], "rb") as f:
+                      st.download_button(
+                          "↓  Word", f,
+                          file_name=st.session_state[word_key].split("/")[-1],
+                          mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                          use_container_width=True,
+                          help="Monatsplan als Word-Dokument (Verteiler)",
+                      )
+  
+              sec("Für Klinikadministration")
+              pc, tc, _ = st.columns([1.3, 1.6, 5.1])
+              with pc:
+                  pptx_key = f"pptx_file_{k}"
+                  try:
+                      if pptx_key not in st.session_state:
+                          with st.spinner("Slides werden erstellt …"):
+                              st.session_state[pptx_key] = export_to_pptx(
+                                  schedule, month=sel_m, year=sel_y,
+                              )
+                      with open(st.session_state[pptx_key], "rb") as f:
+                          st.download_button(
+                              "↓  Slides", f,
+                              file_name=st.session_state[pptx_key].split("/")[-1],
+                              mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                              use_container_width=True,
+                              help="Präsentation für die Monitore (Pausenräume)",
+                          )
+                  except Exception as _pe:
+                      st.caption(f"Slides: {_pe}")
+              with tc:
+                  tn_key = f"tn_file_{k}"
+                  try:
+                      if tn_key not in st.session_state:
+                          with st.spinner("TN-Listen werden erstellt …"):
+                              st.session_state[tn_key] = export_tn_listen(
+                                  schedule, month=sel_m, year=sel_y,
+                                  template_path="src/TN_Liste_Vorlage.docx",
+                              )
+                      with open(st.session_state[tn_key], "rb") as f:
+                          st.download_button(
+                              "↓  TN-Listen", f,
+                              file_name=st.session_state[tn_key].split("/")[-1],
+                              mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                              use_container_width=True,
+                              help="Eine Teilnehmerliste pro Veranstaltung des Monats",
+                          )
+                  except Exception as _te:
+                      st.caption(f"TN-Listen: {_te}")
+  
+  
+  
+            
             if can_export:
                 sec("Export — Alle Monate")
                 dc2, _, __ = st.columns([1.3, 1.3, 5])
