@@ -68,17 +68,39 @@ def is_valid_person(name):
 
 
 # -------------------------
+# SAFE STRING CONVERSION
+# -------------------------
+def _is_missing(value):
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def as_text(series):
+    """NaN-safe conversion of a Series to plain Python strings.
+
+    pandas >= 3 keeps missing values as NA inside .astype(str). A column that
+    is entirely missing therefore stays float64 and the .str accessor raises
+    "Can only use .str accessor with string values, not floating".
+    Missing values become "" here, so .str always works.
+    """
+    out = series.map(lambda v: "" if _is_missing(v) else str(v))
+    return out.astype("object").astype(str)
+
+
+# -------------------------
 # SPLIT MULTI-PERSON
 # -------------------------
 def explode_persons(df):
 
     df = df.copy()
 
-    df["person"] = df["responsible"].astype(str).str.lower()
+    df["person"] = as_text(df["responsible"]).str.lower()
     df = df.assign(person=df["person"].str.split("/"))
     df = df.explode("person")
 
-    df["person"] = df["person"].str.strip()
+    df["person"] = as_text(df["person"]).str.strip()
 
     return df
 
@@ -173,7 +195,7 @@ def compute_fairness_from_schedule(schedule_all, history_df=None, pep_df=None):
         pep_future = pep_future[pep_future["date"].dt.date >= today.replace(day=1)]
         if not pep_future.empty:
             pep_future["lastname"] = (
-                pep_future["name_clean"].astype(str).str.strip().str.lower()
+                as_text(pep_future["name_clean"]).str.strip().str.lower()
                 .apply(_extract_lastname)
             )
             active_lastnames = set(pep_future["lastname"].dropna().unique())
@@ -193,10 +215,10 @@ def compute_fairness_from_schedule(schedule_all, history_df=None, pep_df=None):
                 hist = pd.DataFrame()
 
         if not hist.empty:
-            hist["person"] = hist["responsible_clean"].astype(str).str.lower().str.strip()
+            hist["person"] = as_text(hist["responsible_clean"]).str.lower().str.strip()
             hist = hist.assign(person=hist["person"].str.split("/"))
             hist = hist.explode("person")
-            hist["person"] = hist["person"].str.strip()
+            hist["person"] = as_text(hist["person"]).str.strip()
             hist["person"] = hist["person"].apply(normalize_name)
             hist = hist[hist["person"].apply(is_valid_person)]
 
