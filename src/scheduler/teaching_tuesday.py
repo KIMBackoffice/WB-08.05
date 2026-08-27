@@ -56,13 +56,29 @@ Datum	Startzeit	Endzeit	Veranwortlich (Vorname Nachname)	Thema	Raum	Notizen
 
         # -------------------------
         # TOPIC (speaker is NOT folded in here anymore — it goes to responsible)
+        # Der Veranstaltungsname wird immer mit "Teaching Tuesday: " vorangestellt.
+        # Ist im Sheet kein Thema erfasst, bleibt nur "Teaching Tuesday" stehen.
         # -------------------------
         topic = str(row.get("thema") or "").strip()
 
+        if topic.lower().startswith("teaching tuesday"):
+            pass                                  # bereits im Sheet vorangestellt
+        elif topic:
+            topic = f"Teaching Tuesday: {topic}"
+        else:
+            topic = "Teaching Tuesday"
+
         # -------------------------
         # ROOM
+        # Sheet-Raum + " oder Zoom" (Teaching Tuesday läuft immer hybrid).
+        # Steht "Zoom" bereits im Sheet-Eintrag, wird nichts angehängt.
         # -------------------------
-        room = row.get("raum") or ""
+        room = str(row.get("raum") or "").strip()
+
+        if not room:
+            room = "Zoom"
+        elif "zoom" not in room.lower():
+            room = f"{room} oder Zoom"
 
         # -------------------------
         # RESPONSIBLE — the sheet speaker, formatted "F. Lastname"
