@@ -38,10 +38,11 @@ EVENT_ZIELGRUPPE = {
     "PA_Weiterbildung":     ["PA"],     # pflegeassistenten.py → Fortbildungen für Pflegeassistenz
 
     # =========================
-    # PFLEGE — P / S / (A)
+    # PFLEGE — A / P / S
     # =========================
-    # A entfernt auf Wunsch Doris (07/2026): WB primär für Pflege + NDS-Studierende
-    "Montagscurriculum":    ["P", "S"], # montagscurriculum.py → Montagscurriculum
+    # A wieder aufgenommen (08/2026): Montagscurriculum ist auch für die
+    # Ärzteschaft offen → Häkchen bei "Ärzteschaft" im Word-Export.
+    "Montagscurriculum":    ["A", "P", "S"], # montagscurriculum.py → Montagscurriculum
 
     # =========================
     # MIXED — A / P
