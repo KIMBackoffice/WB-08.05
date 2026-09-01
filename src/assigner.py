@@ -4,7 +4,7 @@
 # pick_person_fair() directly, this file is kept for backwards compatibility.
 # All duty codes and role sets imported from config.py.
 
-from src.selector import pick_person_fair
+from src.selector import pick_person_fair, pick_s_dienst
 from src.config import (
     SENIOR_ROLES,
     AA_ROLE,
@@ -19,11 +19,12 @@ def assign_person(row, pep_df, selector):
     subtype = row.get("subtype")
 
     if subtype == "COD_SENIOR":
-        return pick_person_fair(
+        # S-COD = whoever holds S-Dienst (823). No fairness, no gap, no
+        # tracking — see selector.pick_s_dienst().
+        return pick_s_dienst(
             pep_df, d,
+            s_dienst=S_DIENST,          # S-Dienst code 823
             roles=SENIOR_ROLES,
-            duty_priority=[S_DIENST],   # S-Dienst code 823
-            selector=selector
         )
 
     elif subtype in {"PEER", "COD_JUNIOR", "PHYSIO"}:
