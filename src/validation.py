@@ -44,7 +44,7 @@ def prepare_history(df):
 #   fallback (no role info)           → flagged if assigned in the LAST 1 month
 #
 # EVENT              SOURCE FILE     ROLE POOL
-# COD_SENIOR         tuesday.py      SENIOR        (3-month rule)
+# COD_SENIOR         tuesday.py      SENIOR        EXEMPT — bound to S-Dienst, no recency rule
 # COD_JUNIOR         tuesday.py      AA            (1-month rule)
 # PEER               tuesday.py      AA            (1-month rule)
 # PHYSIO             tuesday.py      AA            (1-month rule)
@@ -52,7 +52,6 @@ def prepare_history(df):
 # Mittwoch_Curriculum wednesday.py   INTERMEDIATE  (2-month rule)
 # -------------------------
 HISTORY_RELEVANT_EVENTS = {
-    "COD_SENIOR",          # tuesday.py — senior — 3-month recency rule
     "COD_JUNIOR",          # tuesday.py — AA     — 1-month recency rule
     "PEER",                # tuesday.py — AA     — 1-month recency rule
     "PHYSIO",              # tuesday.py — AA     — 1-month recency rule
