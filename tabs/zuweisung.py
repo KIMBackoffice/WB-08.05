@@ -203,14 +203,20 @@ def _commit_edits(sc: pd.DataFrame, edits: dict, month: int):
 # EXCEL EXPORT
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _get_schedule_all_for_export(month: int) -> pd.DataFrame:
-    """
-    Mehrmonatsplan (ab dem gewählten Monat) für die Spalte «nächste Zuweisung».
-    Nutzt den bereits berechneten schedule_all aus dem Analyse-Tab, wenn er
-    passt; sonst wird er hier einmal berechnet und gecacht.
-    """
+def _pep_export_months(current_month: int) -> list:
+    """Alle Monate mit PEP-Daten ab dem laufenden Monat."""
     pep_months = sorted(st.session_state.get("pep_months", set()))
-    months     = [m for m in pep_months if m >= month] or [month]
+    months     = [m for m in pep_months if m >= current_month]
+    return months or [current_month]
+
+
+def _get_schedule_all_for_export(months: list) -> pd.DataFrame:
+    """
+    Mehrmonatsplan über alle PEP-Monate — Basis für die Export-Zeilen UND für
+    die Spalte «nächste Zuweisung». Nutzt den bereits berechneten schedule_all
+    aus dem Analyse-Tab, wenn er alle nötigen Monate abdeckt.
+    """
+    months = sorted(set(months))
 
     cached = st.session_state.get("schedule_all")
     if cached is not None and not cached.empty:
@@ -218,7 +224,7 @@ def _get_schedule_all_for_export(month: int) -> pd.DataFrame:
         if cached_months and set(months).issubset(set(cached_months)):
             return cached
 
-    key       = f"zuw_xlsx_sched_all_{month}"
+    key       = "zuw_xlsx_sched_all"
     key_stamp = f"{key}_months"
     if st.session_state.get(key_stamp) == tuple(months) and key in st.session_state:
         return st.session_state[key]
@@ -244,13 +250,13 @@ def _get_schedule_all_for_export(month: int) -> pd.DataFrame:
 def _replace_month_in_schedule(sched_all: pd.DataFrame, sc_rel: pd.DataFrame,
                                month: int) -> pd.DataFrame:
     """
-    Ersetzt im Mehrmonatsplan die Zeilen des gewählten Monats durch die
-    aktuell im Tab angezeigten (sc_rel) — inkl. Overrides und Vorschau-Edits.
+    Ersetzt im Mehrmonatsplan die Zeilen des aktuell im Tab bearbeiteten Monats
+    durch die angezeigte Version (inkl. Overrides und Vorschau-Änderungen).
     """
     if sc_rel is None or sc_rel.empty:
         return sched_all
     live = sc_rel.copy()
-    live["date"] = pd.to_datetime(live["date"], errors="coerce")
+    live["date"]  = pd.to_datetime(live["date"], errors="coerce")
     live["month"] = month
 
     if sched_all is None or sched_all.empty:
@@ -262,50 +268,95 @@ def _replace_month_in_schedule(sched_all: pd.DataFrame, sc_rel: pd.DataFrame,
     return pd.concat([base, live], ignore_index=True).sort_values("date")
 
 
+def _months_label(months: list) -> str:
+    return ", ".join(MONTH_LABELS.get(m, str(m)) for m in months)
+
+
 def _render_xlsx_export(sc_rel: pd.DataFrame, month: int):
-    """Button-Paar: Excel erstellen → herunterladen."""
+    """
+    Excel-Auswertung über ALLE Monate mit PEP-Daten (ab dem laufenden Monat).
+    Einzelne Monate lassen sich abwählen.
+    """
     from src.export_zuweisung_xlsx import build_zuweisung_xlsx
 
-    data_d   = st.session_state.get("data", {})
-    file_key = f"zuw_xlsx_bytes_{month}"
+    data_d         = st.session_state.get("data", {})
+    current_month  = datetime.date.today().month
+    avail_months   = _pep_export_months(current_month)
 
-    b_col, d_col, _ = st.columns([2, 2, 4])
+    with st.expander("📊 Excel-Auswertung — alle Monate mit PEP-Daten", expanded=False):
+        st.caption(
+            "Eine Zeile pro zugewiesene Person: Rolle, Tagesdienst, letzte und nächste "
+            "Zuweisung, 30-Tage-Checks und bis zu 7 Alternativkandidaten. "
+            f"Verfügbare PEP-Monate: {_months_label(avail_months)}."
+        )
 
-    with b_col:
-        if st.button("📊 Excel-Auswertung erstellen", key=f"zuw_xlsx_build_{month}",
-                     use_container_width=True,
-                     help="Eine Zeile pro zugewiesene Person, mit letzter/nächster "
-                          "Zuweisung, 30-Tage-Checks und bis zu 7 Alternativkandidaten."):
-            with st.spinner("Auswertung wird berechnet ..."):
-                try:
-                    sched_all = _get_schedule_all_for_export(month)
-                    # Der gewählte Monat wird durch die AKTUELL angezeigte Version
-                    # ersetzt (inkl. Overrides und Vorschau-Änderungen), damit
-                    # «letzte / nächste Zuweisung» innerhalb des Monats stimmen.
-                    sched_all = _replace_month_in_schedule(sched_all, sc_rel, month)
-                    st.session_state[file_key] = build_zuweisung_xlsx(
-                        schedule_month=sc_rel,
-                        pep_df=data_d.get("pep"),
-                        history_df=data_d.get("history"),
-                        schedule_all=sched_all,
-                        aa_registry=data_d.get("aa_registry") or {},
-                        month_label=MONTH_LABELS.get(month, str(month)),
-                    )
-                except Exception as e:
-                    st.session_state.pop(file_key, None)
-                    st.error(f"Excel-Export fehlgeschlagen: {e}")
+        sel_months = st.multiselect(
+            "Monate im Export",
+            options=avail_months,
+            default=avail_months,
+            format_func=lambda m: MONTH_LABELS.get(m, str(m)),
+            key="zuw_xlsx_months",
+        )
+        if not sel_months:
+            banner("Bitte mindestens einen Monat auswählen.", "info")
+            return
+        sel_months = sorted(sel_months)
 
-    with d_col:
-        if st.session_state.get(file_key):
-            st.download_button(
-                "⬇️ Excel herunterladen",
-                data=st.session_state[file_key],
-                file_name=f"Zuweisung_{PLAN_YEAR}_{month:02d}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key=f"zuw_xlsx_dl_{month}",
-                use_container_width=True,
-                type="primary",
-            )
+        file_key  = "zuw_xlsx_bytes"
+        stamp_key = "zuw_xlsx_bytes_months"
+
+        b_col, d_col, _ = st.columns([2, 2, 3])
+
+        with b_col:
+            if st.button("📊 Excel erstellen", key="zuw_xlsx_build",
+                         use_container_width=True):
+                with st.spinner(f"Auswertung wird berechnet ({_months_label(sel_months)}) ..."):
+                    try:
+                        # Immer ALLE PEP-Monate rechnen, damit «nächste Zuweisung»
+                        # auch über das Ende der gewählten Monate hinaus schaut.
+                        sched_all = _get_schedule_all_for_export(avail_months)
+                        sched_all = _replace_month_in_schedule(sched_all, sc_rel, month)
+
+                        sched_all["date"] = pd.to_datetime(sched_all["date"], errors="coerce")
+                        sched_sel = sched_all[
+                            sched_all["date"].dt.month.isin(sel_months)
+                            & (sched_all["date"].dt.year == PLAN_YEAR)
+                        ].copy()
+
+                        st.session_state[file_key] = build_zuweisung_xlsx(
+                            schedule_month=sched_sel,
+                            pep_df=data_d.get("pep"),
+                            history_df=data_d.get("history"),
+                            schedule_all=sched_all,
+                            aa_registry=data_d.get("aa_registry") or {},
+                            month_label=_months_label(sel_months),
+                        )
+                        st.session_state[stamp_key] = tuple(sel_months)
+                    except Exception as e:
+                        st.session_state.pop(file_key, None)
+                        st.error(f"Excel-Export fehlgeschlagen: {e}")
+
+        with d_col:
+            if st.session_state.get(file_key):
+                built = st.session_state.get(stamp_key, ())
+                if len(built) == 1:
+                    fname = f"Zuweisung_{PLAN_YEAR}_{built[0]:02d}.xlsx"
+                elif built:
+                    fname = f"Zuweisung_{PLAN_YEAR}_{built[0]:02d}-{built[-1]:02d}.xlsx"
+                else:
+                    fname = f"Zuweisung_{PLAN_YEAR}.xlsx"
+                st.download_button(
+                    "⬇️ Excel herunterladen",
+                    data=st.session_state[file_key],
+                    file_name=fname,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="zuw_xlsx_dl",
+                    use_container_width=True,
+                    type="primary",
+                )
+
+        if st.session_state.get(stamp_key) and st.session_state.get(stamp_key) != tuple(sel_months):
+            banner("Monatsauswahl geändert — bitte Excel neu erstellen.", "warn")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
