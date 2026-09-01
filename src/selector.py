@@ -101,9 +101,13 @@ class SmartFairSelector:
             6: 0.1,
         }
 
+        # COD_SENIOR is DELIBERATELY NOT in this set. S-COD is not a fairness
+        # event: it is bound to whoever holds S-Dienst (823) on the day, so a
+        # past S-COD must neither penalise a person's score nor trigger the
+        # hard 60-day gap for any other event. See pick_s_dienst() below.
         HISTORY_RELEVANT_EVENTS = {
             "COD_JUNIOR", "PEER", "PHYSIO",
-            "Journal_Club", "Mittwoch_Curriculum", "COD_SENIOR"
+            "Journal_Club", "Mittwoch_Curriculum",
         }
 
         if history_df is not None and not history_df.empty:
@@ -477,6 +481,60 @@ def pick_person_fair(pep_df, date, roles, duty_priority, selector, exclude=None,
 
     # No type / no tier produced a gap-eligible candidate. Leave the slot empty.
     return None
+
+
+# =========================
+# S-DIENST (COD_SENIOR / S-COD) — NO FAIRNESS, NO GAP
+# =========================
+
+def pick_s_dienst(pep_df, date, s_dienst, roles=None):
+    """
+    Pick the responsible person for COD_SENIOR (S-COD).
+
+    DESIGN DECISION (admin rule, deliberately different from every other slot):
+      S-COD is NOT a fairness event. It belongs to whoever holds S-Dienst
+      (duty code 823) on that date — nothing else. Therefore this function
+      bypasses the fairness selector completely:
+
+        * NO minimum-gap / recency filter  — the same senior may hold S-COD in
+          consecutive months. The 60-day senior gap used to empty this slot
+          whenever one person had S-Dienst on two consecutive first Tuesdays.
+        * NO fairness scoring, NO history load.
+        * NO tracking — the pick is NOT written into the selector's
+          assignment_counts / last_assigned, so holding S-COD never makes a
+          senior less likely to be picked for Mittwochscurriculum, Journal Club
+          or anything else, and never blocks them via the gap rule.
+        * NO first-month rule, NO EARLIEST_ASSIGNMENT, NO permanent exclusions.
+
+    Duty is authoritative: if somebody has 823 on that date they get the slot.
+    `roles` (if given) is only a sanity filter and is dropped when it would
+    otherwise leave the slot empty.
+
+    If several people hold S-Dienst on the same date (should not happen), the
+    alphabetically first name_clean is returned so output stays deterministic.
+
+    Returns a name_clean string, or None if nobody has S-Dienst that day.
+    """
+    d = pd.Timestamp(date).normalize()
+
+    day_df = pep_df[pep_df["date"].dt.normalize() == d]
+    if day_df.empty:
+        return None
+
+    duties = set(s_dienst)
+    cand = day_df[day_df["duty_code"].isin(duties)]
+    if cand.empty:
+        return None
+
+    if roles:
+        by_role = cand[cand["role_code"].isin(roles)]
+        if not by_role.empty:
+            cand = by_role
+
+    names = sorted(
+        {str(n).strip().lower() for n in cand["name_clean"] if str(n).strip()}
+    )
+    return names[0] if names else None
 
 
 # =========================
