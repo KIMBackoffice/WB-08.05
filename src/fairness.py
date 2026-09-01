@@ -119,9 +119,11 @@ def explode_persons(df):
 #   - Must NOT be sheet-driven fixed assignments
 #     → e.g. Teaching_Tuesday, Bedside_Infektiologie, TTE_Curriculum are excluded
 #     → those have a fixed responsible person from the Google Sheet, not rotated
-#   - COD_SENIOR excluded here (but included in validation.py)
-#     → COD_SENIOR is assigned to senior doctors (CA/SCA/LA/SFA_I) — separate pool
-#     → fairness for seniors tracked separately if needed
+#   - COD_SENIOR excluded everywhere (fairness AND validation)
+#     → S-COD is bound to whoever holds S-Dienst (823); it is not rotated,
+#       so it must not appear in fairness stats or recency checks.
+#       EVENT_DUTY_RULES still lists it so the manual-alternatives dropdown
+#       in the Zuweisung tab keeps working.
 #
 # EVENT          SOURCE FILE     ASSIGNED BY         ROLE POOL
 # COD_JUNIOR     tuesday.py      assign_person()     AA
@@ -131,7 +133,6 @@ def explode_persons(df):
 # Mittwoch_Curriculum wednesday.py pick_person_fair() INTERMEDIATE
 # -------------------------
 RELEVANT_EVENTS = {
-    "COD_SENIOR",          # tuesday.py — SENIOR role — S-Dienst (823)
     "COD_JUNIOR",          # tuesday.py — AA role — Case of the Day junior
     "PEER",                # tuesday.py — AA role — Peer Teaching session
     "PHYSIO",              # tuesday.py — AA role — Physiologie Talk
