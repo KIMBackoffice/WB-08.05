@@ -9,7 +9,7 @@ from src.config import (
     S_DIENST,        # {823} — S-Dienst (Senior duty), used for COD_SENIOR
     TAGDIENST_AA,    # AA Tagdienst — the only duty pool for PEER/COD/PHYSIO
 )
-from src.selector import pick_person_fair
+from src.selector import pick_person_fair, pick_s_dienst
 
 
 def build_tuesday_schedule(calendar_df, physio_df, pep_df, selector,
@@ -34,7 +34,7 @@ def build_tuesday_schedule(calendar_df, physio_df, pep_df, selector,
                                apply_overrides() can match it exactly.
 
     ROTATION (by weekday_position within month):
-      pos 1 always:     COD_SENIOR  — Senior role, S-Dienst priority (code 823)
+      pos 1 always:     COD_SENIOR  — whoever has S-Dienst (823); no fairness/gap
       Even months:
         pos 2:          PHYSIO      — AA, Tagdienst AA only
         pos odd 3,5…:   PEER        — AA
@@ -138,12 +138,14 @@ def build_tuesday_schedule(calendar_df, physio_df, pep_df, selector,
             continue
 
         if subtype == "COD_SENIOR":
-            # S-Dienst (code 823) for senior doctors
-            responsible = pick_person_fair(
+            # S-COD is bound to whoever holds S-Dienst (823) that day.
+            # It is NOT a fairness slot: no gap rule, no scoring, and the pick
+            # is not recorded in the selector, so it never influences (or is
+            # influenced by) any other event. See selector.pick_s_dienst().
+            responsible = pick_s_dienst(
                 pep_df, d,
+                s_dienst=S_DIENST,
                 roles=SENIOR_ROLES,
-                duty_priority=[S_DIENST],
-                selector=selector
             )
         else:
             # AA slots: TAGDIENST_AA only.
