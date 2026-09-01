@@ -129,6 +129,111 @@ EXCLUDED_DUTY_CODES = {
 
 
 # =========================
+# RUNTIME CONFIG VIA STREAMLIT SECRETS
+# =========================
+# EARLIEST_ASSIGNMENT and EXCLUDED_FROM_ASSIGNMENT hold STAFF NAMES and are
+# therefore NOT stored in this repository. They live in Streamlit Cloud
+# (Settings -> Secrets) only. Changes go live on the next app restart, without
+# a commit or deploy.
+#
+# Secrets format (TOML). NOTE the ordering rule: a bare key must appear BEFORE
+# the first [table] header, otherwise TOML nests it inside that table. Putting
+# EXCLUDED_FROM_ASSIGNMENT after [gcp_service_account] would silently move it
+# into the service-account table and break Google auth.
+#
+#     EXCLUDED_FROM_ASSIGNMENT = ["nachname vorname", "nachname vorname"]
+#
+#     [EARLIEST_ASSIGNMENT]
+#     "nachname vorname"  = "2026-09"
+#     "nachname vorname"  = "2026-11"
+#
+# Rules:
+#   * Keys are PEP name_clean: LOWERCASE "nachname vorname".
+#   * Dates are "YYYY-MM" strings (month granularity — a day is not supported).
+#   * The code default is EMPTY on purpose. A missing, empty or malformed
+#     secrets value therefore means NOBODY is blocked, which is dangerous, so
+#     it is reported as a RED ERROR banner in the app rather than passing
+#     silently. Never ignore that banner.
+#   * config.py must stay importable without Streamlit (inline test scripts),
+#     hence every secrets access is wrapped.
+
+CONFIG_SOURCE: dict = {"EARLIEST_ASSIGNMENT": "code", "EXCLUDED_FROM_ASSIGNMENT": "code"}
+CONFIG_WARNINGS: list = []   # list of (level, message); level = "err" | "warn"
+
+
+def _read_secrets():
+    """Return st.secrets, or {} when not running under Streamlit / no secrets file."""
+    try:
+        import streamlit as st
+        return st.secrets
+    except Exception:
+        return {}
+
+
+def _parse_earliest(raw):
+    """
+    Convert {"nachname vorname": "YYYY-MM"} into {"nachname vorname": (year, month)}.
+    Raises ValueError on bad or empty input so the caller can report an error
+    instead of silently mis-planning.
+    """
+    out = {}
+    for name, val in dict(raw).items():
+        key = str(name).strip().lower()
+        txt = str(val).strip()
+        parts = txt.replace("/", "-").split("-")
+        if len(parts) != 2:
+            raise ValueError(f"['{name}'] = '{txt}' — 'YYYY-MM' erwartet")
+        try:
+            year, month = int(parts[0]), int(parts[1])
+        except ValueError:
+            raise ValueError(f"['{name}'] = '{txt}' — 'YYYY-MM' erwartet")
+        if not (2000 <= year <= 2100) or not (1 <= month <= 12):
+            raise ValueError(f"['{name}'] = '{txt}' — Jahr/Monat ausserhalb des Bereichs")
+        out[key] = (year, month)
+    if not out:
+        raise ValueError("Liste ist leer")
+    return out
+
+
+def _parse_excluded(raw):
+    """Convert a TOML list of names into a lowercase set."""
+    if isinstance(raw, str):
+        raise ValueError("muss eine TOML-Liste sein, kein String")
+    out = {str(n).strip().lower() for n in list(raw) if str(n).strip()}
+    if not out:
+        raise ValueError("Liste ist leer")
+    return out
+
+
+def _resolve(key, parser, empty, label):
+    """
+    Read `key` from Streamlit Secrets and parse it.
+
+    There is no code fallback with real content: the names are staff data and
+    are kept out of the repo. So a missing or broken key means NOBODY is
+    blocked and everyone becomes assignable immediately. That is reported as
+    an ERROR, never silently.
+    """
+    secrets = _read_secrets()
+    try:
+        raw = secrets[key]
+    except Exception:
+        return empty, "code", (
+            "err",
+            f"{label} fehlt in den Streamlit Secrets — es ist aktuell NIEMAND "
+            f"gesperrt. Bitte den Key unter Settings → Secrets ergaenzen.",
+        )
+    try:
+        return parser(raw), "secrets", None
+    except Exception as e:
+        return empty, "code", (
+            "err",
+            f"{label} aus Secrets ungueltig ({e}) — es ist aktuell NIEMAND "
+            f"gesperrt. Bitte den Eintrag korrigieren.",
+        )
+
+
+# =========================
 # EARLIEST PLANNING MONTH
 # =========================
 # People who may only be assigned FROM a certain (year, month) onward.
@@ -138,35 +243,30 @@ EXCLUDED_DUTY_CODES = {
 # Typical use: new AA / OA who joined mid-year and should not present
 # in their first month (handled separately by is_first_month) OR who
 # need a longer onboarding period before taking assignments.
- 
-EARLIEST_ASSIGNMENT: dict = {
-    # Add new entries here as needed:
-    # "name lastname":     (2026, month),
-    "wolfer lukas":        (2026, 9),
-    "berner lea":          (2026, 9),
-    "sridharan alexandre": (2026, 9),
-    "sket raphael":        (2026, 9),
-    "weber annatina":      (2026, 9),
-    "michel matthias":     (2026, 9),
-    "najaf zadeh":         (2026, 9),
-    "raio noemi":          (2026, 9),
-    "trost patricia":      (2026, 9),
-    "wintsch nathalie":    (2026, 9),
-    "jaquier marie-eve":   (2026, 9),
-    "lötscher stefan":     (2026, 9),
-    "major luca":          (2026, 9), 
-    "buchholz ulrike":     (2027, 6),
-}
- 
- 
+#
+# CONTENT LIVES IN STREAMLIT SECRETS — see the block above.
+
+EARLIEST_ASSIGNMENT, _src, _msg = _resolve(
+    "EARLIEST_ASSIGNMENT", _parse_earliest, {}, "EARLIEST_ASSIGNMENT",
+)
+CONFIG_SOURCE["EARLIEST_ASSIGNMENT"] = _src
+if _msg:
+    CONFIG_WARNINGS.append(_msg)
+
+
 # =========================
 # PERMANENT EXCLUSIONS
 # =========================
 # People never assigned by the algorithm regardless of duty/role.
 # Typical use: part-time staff, on long leave, or explicitly opted out.
- 
-EXCLUDED_FROM_ASSIGNMENT: set = {
-    "mazyad haian",
-    # Add further exclusions here:
-    # "name lastname",
-}
+#
+# CONTENT LIVES IN STREAMLIT SECRETS — see the block above.
+
+EXCLUDED_FROM_ASSIGNMENT, _src, _msg = _resolve(
+    "EXCLUDED_FROM_ASSIGNMENT", _parse_excluded, set(), "EXCLUDED_FROM_ASSIGNMENT",
+)
+CONFIG_SOURCE["EXCLUDED_FROM_ASSIGNMENT"] = _src
+if _msg:
+    CONFIG_WARNINGS.append(_msg)
+
+del _src, _msg
