@@ -38,6 +38,11 @@ MAX_CANDIDATES = 7
 
 WEEKDAY_DE_SHORT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
+_MONTH_NAMES = {
+    1: "Jan", 2: "Feb", 3: "Mär", 4: "Apr", 5: "Mai", 6: "Jun",
+    7: "Jul", 8: "Aug", 9: "Sep", 10: "Okt", 11: "Nov", 12: "Dez",
+}
+
 # Kurzcode wie im Plan
 EVENT_CODE = {
     "COD_SENIOR":          "S-COD",
@@ -269,6 +274,7 @@ def build_zuweisung_rows(
             days_start = (day - first_pep).days if first_pep is not None else None
 
             rec = {
+                "monat":            _MONTH_NAMES.get(day.month, str(day.month)),
                 "datum":            _fmt_date(day),
                 "wochentag":        WEEKDAY_DE_SHORT[day.weekday()],
                 "zeit_von":         t_von,
@@ -339,6 +345,7 @@ def build_zuweisung_rows(
 # ── Excel-Ausgabe ──────────────────────────────────────────────────────────
 
 _HEADERS_DE = {
+    "monat": "Monat",
     "datum": "Datum", "wochentag": "Tag", "zeit_von": "Zeit von", "zeit_bis": "Zeit bis",
     "code": "Code", "veranstaltung": "Veranstaltung", "thema": "Thema", "raum": "Raum",
     "slot": "Slot", "slot_bezeichnung": "Slot-Typ",
@@ -425,6 +432,7 @@ def build_zuweisung_xlsx(
                 c.fill = fill_alt
 
     widths = {
+        "monat": 8,
         "datum": 11, "wochentag": 6, "zeit_von": 9, "zeit_bis": 9, "code": 8,
         "veranstaltung": 24, "thema": 34, "raum": 12, "slot": 6, "slot_bezeichnung": 11,
         "person": 20, "person_pep": 20, "rolle_pep": 8, "funktion_detail": 13,
@@ -445,7 +453,7 @@ def build_zuweisung_xlsx(
         ws.column_dimensions[get_column_letter(j)].width = w
 
     ws.row_dimensions[1].height = 32
-    ws.freeze_panes = "C2"
+    ws.freeze_panes = "D2"
     ws.auto_filter.ref = f"A1:{get_column_letter(len(cols))}{len(df) + 1}"
 
     # ── Legende ───────────────────────────────────────────────────────────
@@ -455,6 +463,7 @@ def build_zuweisung_xlsx(
         ("Export", f"Zuweisung {month_label}".strip()),
         ("Erstellt", stamp),
         ("", ""),
+        ("Umfang", "Alle algorithmisch zugewiesenen Veranstaltungen der gewählten Monate."),
         ("Zeile", "Eine Zeile pro zugewiesene Person. Journal Club = 2 Zeilen (Slot 1 = OA/Int., Slot 2 = AA)."),
         ("Code", "S-COD, COD, PEER, PHYSIO, MI (Mittwochscurriculum), JC (Journal Club)"),
         ("Rolle", "Rollencode aus PEP am Veranstaltungstag (AA, OA_I, OA_II, SOA, SFA_II ...)"),
