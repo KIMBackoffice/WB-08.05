@@ -25,6 +25,7 @@ import streamlit as st
 from src.constants import PLAN_YEAR, get_rolling_months, ym_key
 from src.ui        import doc_loader, banner
 from src.fairness  import clear_alternatives_cache
+from src.config import CONFIG_WARNINGS, CONFIG_SOURCE
 from src.data_loader import (
     load_simulation, load_physio, load_imc_updates, load_teaching_tuesday,
     load_mittwoch, load_bedside, load_trauma_board, load_pep_clean, load_tte,
@@ -272,6 +273,12 @@ if st.session_state.pop(SK.AUTOLOAD, False):
     st.session_state[SK.DATA]      = _data_al
     st.session_state[SK.PEP_MONTHS] = get_pep_months(_data_al)
     _pep_months_al = st.session_state[SK.PEP_MONTHS]
+
+    # EARLIEST_ASSIGNMENT / EXCLUDED_FROM_ASSIGNMENT live in Streamlit Secrets.
+    # Rendered here and NOT inside the cached load_all_data(), so the message
+    # survives every rerun instead of appearing only on the first load.
+    for _lvl, _msg in CONFIG_WARNINGS:
+        banner(_msg, _lvl)
 
     # New AAs auto-added to the registry → prompt admin to set Fellow/Rotation
     _new_aas = _data_al.get("aa_registry_new_names") or []
