@@ -49,6 +49,7 @@ import tabs.benachrichtigung as tab_ben
 import tabs.zuweisung        as tab_zuw
 import tabs.zuweisung_b      as tab_zuw_b
 import tabs.pep_upload       as tab_pep
+import tabs.wb_upload        as tab_wb
 import tabs.testing          as tab_testing
 
 
@@ -336,8 +337,8 @@ if st.session_state.pop(SK.AUTOLOAD, False):
 
 
 # ── Tab dispatch ──────────────────────────────────────────────────────────────
-# ORDER v1.3: Plan → Kontrolle und Abschluss → Emails & Kalender → Fairness → Manuelle Zuweisung → Manuelle Zuweisung B → PEP Ingestion
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+# ORDER v1.4: Plan → Kontrolle und Abschluss → Emails & Kalender → Fairness → Manuelle Zuweisung → Manuelle Zuweisung B → PEP Ingestion → WB Ingestion → Testing
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
     "Plan",
     "Kontrolle und Abschluss",
     "Emails & Kalender",
@@ -345,6 +346,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "Manuelle Zuweisung",
     "Personen Zuweisung überprüfen",
     "PEP Ingestion",
+    "WB Ingestion",
     "Testing",
 ])
 
@@ -370,6 +372,9 @@ with tab7:
     tab_pep.render()
 
 with tab8:
+    tab_wb.render()
+
+with tab9:
     tab_testing.render()
 
 # ── Footer ───────────────────────────────────────────────────────────────────
