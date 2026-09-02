@@ -387,6 +387,11 @@ def load_diverse(url):
 # NEW LOADERS
 # =========================
 
+def load_fpr(url):
+    """FPR Fortbildungen — same layout as the Diverse sheet (see fpr.py)."""
+    return load_diverse(url)
+
+
 def load_fokus_intensivpflege(url):
     """Fokus Intensivpflege — same header as other Pflege sheets."""
     df = load_sheet(url)
