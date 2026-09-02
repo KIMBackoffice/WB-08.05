@@ -8,7 +8,7 @@ def _parse_bool(val):
     return str(val).strip().upper() == "TRUE"
 
 
-def schedule_diverse(df):
+def schedule_diverse(df, event_type="Diverse_Veranstaltungen"):
     """
     Diverse Veranstaltungen
     SOURCE:
@@ -24,6 +24,10 @@ def schedule_diverse(df):
         of the global zielgruppe.py lookup — so each row can have
         different checkboxes in the Word output.
         Rows without a date are skipped (still being planned).
+    SHARED:
+        The FPR sheet (FPR_Fortbildungen_Planung) uses an identical layout.
+        src/scheduler/fpr.py delegates here with event_type="FPR" so the
+        checkbox logic exists exactly once. Do not duplicate this function.
     Header:
         Datum  Startzeit  Endzeit  Veranwortlich (Vorname Nachname)  Thema  Raum
         Für Ärzte?  Für Pflege?  Für Studierende?  Für Pflegeassistenten?  Monat
@@ -96,7 +100,7 @@ def schedule_diverse(df):
         events.append({
             "date":        date.normalize(),
             "time":        time_str,
-            "event_type":  "Diverse_Veranstaltungen",
+            "event_type":  event_type,
             "responsible": row.get("veranwortlich (vorname nachname)"),
             "topic":       row.get("thema") or "Diverse Veranstaltungen",
             "room":        row.get("raum") or "",
