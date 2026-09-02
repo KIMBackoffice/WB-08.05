@@ -858,6 +858,27 @@ def apply_overrides(schedule: pd.DataFrame, overrides_df: pd.DataFrame, month: i
     if month_ov.empty:
         return schedule
 
+    # ── Year guard ────────────────────────────────────────────────────────
+    # Overrides are selected by month NUMBER only. The rolling 12-month window
+    # spans two calendar years, so without a year check a July 2026 override
+    # gets applied to the July 2027 schedule: no slot matches (the dates differ
+    # by a year), branch 3 fires and appends a phantom row carrying the 2026
+    # date. Those phantom rows were the stray Jul/Aug 2026 entries in «Alle
+    # Monate». Restrict to overrides whose event_date year matches the year of
+    # the schedule being stamped.
+    if not schedule.empty and "date" in schedule.columns:
+        _sched_years = (
+            pd.to_datetime(schedule["date"], errors="coerce").dt.year.dropna().unique()
+        )
+        if len(_sched_years) == 1:
+            _sched_year = int(_sched_years[0])
+            month_ov = month_ov[
+                pd.to_datetime(month_ov["event_date"], errors="coerce").dt.year
+                == _sched_year
+            ]
+            if month_ov.empty:
+                return schedule
+
     sc = schedule.copy()
     sc["_date_norm"] = pd.to_datetime(sc["date"], errors="coerce").dt.normalize()
 
