@@ -31,7 +31,7 @@ from src.scheduler.epic_update import schedule_epic_update
 from src.scheduler.fachentwicklung import schedule_fachentwicklung
 
 from src.scheduler.tuesday import build_tuesday_schedule
-from src.scheduler.wednesday import build_wednesday_schedule
+from src.scheduler.wednesday import build_wednesday_schedule, build_topic_map
 from src.scheduler.friday import build_friday_schedule
 
 from src.selector import SmartFairSelector
@@ -505,6 +505,13 @@ def generate_full_schedule_aware(year, month, data):
     target_schedule = None
     # Shared set — ensures each PHYSIO slot across months picks a different paper
     _physio_picked: set = set()
+    # Shared topic map — same idea for Mittwochscurriculum. Built ONCE here so
+    # the per-topic rotation survives the month loop below; rebuilding it per
+    # month discarded the rotation and let the same person present the same
+    # topic twice in one quarter. History seeds each topic's last_date so the
+    # rotation also survives across runs, since the sheet column is never
+    # written back.
+    _mittwoch_topics = build_topic_map(get_df("mittwoch_topics"), _history_with_overrides)
 
     # Collect EVERY computed month, not just the target. The warm selector
     # pass already produces all of them; caching them means that when the
@@ -522,7 +529,7 @@ def generate_full_schedule_aware(year, month, data):
 
         # Algorithm events — shared selector carries memory month-to-month
         tuesday   = ensure_schema(build_tuesday_schedule(calendar, get_df("physio"), pep_df_raw, selector, physio_topics_df=get_df("physio_topics"), already_picked_physio_nrs=_physio_picked, override_slots=_override_slots, override_date_map=_override_date_map))
-        wednesday = ensure_schema(build_wednesday_schedule(calendar, pep_df_raw, get_df("mittwoch_topics"), selector, override_slots=_override_slots))
+        wednesday = ensure_schema(build_wednesday_schedule(calendar, pep_df_raw, get_df("mittwoch_topics"), selector, override_slots=_override_slots, topic_map=_mittwoch_topics))
         friday    = ensure_schema(build_friday_schedule(calendar, pep_df_raw, selector, override_slots=_override_slots))
 
         full = pd.concat(
