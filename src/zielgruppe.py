@@ -14,8 +14,6 @@ EVENT_ZIELGRUPPE = {
     # =========================
     # PFLEGE — P only
     # =========================
-    "Pflege_Kinaesthetik":  ["P"],      # kinae_bs.py → Kinästhetik Refresher
-    "Pflege_Basale":        ["P"],      # kinae_bs.py → Basale Stimulation  
     "Angehoerige":          ["P"],      # angehoerige.py → Kommunikationskurs: schwierige Angehörige
     "Sitzungen_Pflege":     ["P"],      # sitzungen.py → Sitzung Gruppen-, Schicht- und Betriebsleitung
 
@@ -75,4 +73,9 @@ EVENT_ZIELGRUPPE = {
     # (actual Zielgruppe read from sheet columns Für Ärzte/Pflege/Studierende/PA)
     # =========================
     "Diverse_Veranstaltungen": ["A", "P", "S", "PA"],  # fallback if no checkboxes
+
+    # =========================
+    # FPR — Kinästhetik / Basale Stimulation (fpr.py) fallback 
+    # =========================
+    "FPR": ["P", "S"],
 }
