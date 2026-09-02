@@ -17,7 +17,7 @@ from src.scheduler.trauma_schockraum import schedule_trauma
 from src.scheduler.bedside import schedule_bedside
 from src.scheduler.tte import schedule_tte
 from src.scheduler.masterclass import schedule_masterclass
-from src.scheduler.kinae_bs import schedule_kinae_bs
+from src.scheduler.fpr import schedule_fpr
 from src.scheduler.nds_fallbesprechung import schedule_nds
 from src.scheduler.ofobi import schedule_ofobi
 from src.scheduler.interprof_therapieplanung import schedule_therapy
@@ -121,13 +121,13 @@ def _build_sheet_events(data: dict) -> list:
         ensure_schema(schedule_bedside(get("bedside"))),
         ensure_schema(schedule_tte(get("tte"))),
         ensure_schema(schedule_masterclass(get("masterclass"))),
-        ensure_schema(schedule_kinae_bs(get("basale"), get("kinae"))),
         ensure_schema(schedule_nds(get("nds"))),
         ensure_schema(schedule_ofobi(get("ofobi"))),
         ensure_schema(schedule_montagscurriculum(get("montagscurriculum"))),
         ensure_schema(schedule_pflegeassistenten(get("pflegeassistenten"))),
         ensure_schema(schedule_sitzungen(get("sitzungen"))),
         ensure_schema(schedule_diverse(get("diverse"))),
+        ensure_schema(schedule_fpr(get("fpr"))),
         ensure_schema(schedule_fokus_intensivpflege(get("fokus"))),
         ensure_schema(schedule_epic_update(get("epic"))),
         ensure_schema(schedule_fachentwicklung(get("fachentwicklung"))),
