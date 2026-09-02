@@ -1,5 +1,6 @@
 # src/scheduler/wednesday.py
 
+import re
 import pandas as pd
 from src.config import (
     INTERMEDIATE_ROLES,
@@ -21,8 +22,55 @@ def _normalize_name_key(s: str) -> str:
             .replace('Ü', 'ue').replace('Ö', 'oe').replace('Ä', 'ae'))
 
 
+# -- Topic string normalization -------------------------------------------
+#
+# History topics come from finalized documents / PDF ingestion and differ from
+# the sheet strings in three predictable ways:
+#   1. they carry the "Mittwochscurriculum: " prefix
+#   2. Word soft-hyphenation leaves artefacts ("posto-perative", "Ursa-chen")
+#   3. umlauts, punctuation and whitespace vary
+# Folding away ALL non-alphanumeric characters neutralises 2 and 3 at once:
+# "posto-perative" and "postoperative" both fold to "postoperative", while
+# genuine hyphens ("Tako-Tsubo") fold identically on both sides.
+
+_TOPIC_PREFIX_RE = re.compile(r'^\s*mittwochs?curriculum\s*[:\-\u2013]\s*', re.IGNORECASE)
+
+
+def _normalize_topic(s: str) -> str:
+    s = str(s or "")
+    s = _TOPIC_PREFIX_RE.sub("", s)
+    s = _normalize_name_key(s)
+    return re.sub(r'[^a-z0-9]', '', s)
+
+
+def _topics_match(a_norm: str, b_norm: str) -> bool:
+    """Exact fold match, or prefix match when one side was truncated.
+    The 20-character floor keeps short generic stems from colliding."""
+    if not a_norm or not b_norm:
+        return False
+    if a_norm == b_norm:
+        return True
+    shorter, longer = sorted((a_norm, b_norm), key=len)
+    return len(shorter) >= 20 and longer.startswith(shorter)
+
+
+def build_topic_map(topics_df, history_df=None):
+    """
+    Public builder. Parses the Mittwoch topic sheet and -- when a history
+    DataFrame is supplied -- advances each topic's last_date to the most
+    recent date that topic was actually presented.
+
+    Build this ONCE per planning run and hand it to every
+    build_wednesday_schedule() call, so topic rotation survives the month
+    loop (mirrors the _physio_picked set in pipeline.py).
+    """
+    topic_map = _build_topic_map(topics_df)
+    _seed_from_history(topic_map, history_df)
+    return topic_map
+
+
 def build_wednesday_schedule(calendar_df, pep_df, topics_df, selector,
-                             override_slots=None):
+                             override_slots=None, topic_map=None):
     """
     Mittwoch Curriculum — every Wednesday, 14:30–15:15
 
@@ -38,6 +86,11 @@ def build_wednesday_schedule(calendar_df, pep_df, topics_df, selector,
        fall back to a generic "Mittwochscurriculum" label.
     4. Update that topic's last_date in-memory so it rotates correctly
        across multiple Wednesdays in the same planning run.
+
+    topic_map: pass a map built once via build_topic_map() so rotation
+       carries ACROSS months. Omitted -> built internally from topics_df,
+       which only rotates within this single call (legacy behaviour, used
+       by generate_full_schedule() and the test harness).
     """
 
     events = []
@@ -45,8 +98,10 @@ def build_wednesday_schedule(calendar_df, pep_df, topics_df, selector,
     if calendar_df is None or calendar_df.empty:
         return pd.DataFrame(events)
 
-    # Build per-person topic lookup once
-    topic_map = _build_topic_map(topics_df)
+    # Build per-person topic lookup once -- unless the caller supplied a
+    # shared one that must survive across months.
+    if topic_map is None:
+        topic_map = _build_topic_map(topics_df)
 
     wednesdays = calendar_df[calendar_df["weekday"] == "Wednesday"]
 
@@ -214,12 +269,83 @@ def _build_topic_map(topics_df):
                 last_date = parsed
 
         topic_map.setdefault(lastname, []).append({
-            "thema":     thema,
-            "last_date": last_date,
-            "firstname": firstname,
+            "thema":       thema,
+            "last_date":   last_date,
+            "firstname":   firstname,
+            "thema_norm":  _normalize_topic(thema),
+            "used_in_run": False,
         })
 
     return topic_map
+
+
+def _seed_from_history(topic_map, history_df):
+    """
+    Advance each topic's last_date using Historical_Assignment.
+
+    The sheet column "Datum (letzter Vortrag)" is maintained by hand and is
+    never written back by the app, so it goes stale the moment a month is
+    finalized. History already records date + topic for every presented
+    Mittwochscurriculum, so we use it as the authoritative recency source and
+    keep the LATER of the two dates.
+
+    A history topic that matches nothing is ignored -- the entry then simply
+    keeps its sheet date, which is the pre-existing behaviour.
+    """
+    if not topic_map or history_df is None or getattr(history_df, "empty", True):
+        return
+
+    hist = history_df.copy()
+
+    if "event_type" in hist.columns:
+        hist = hist[hist["event_type"].astype(str).str.strip() == "Mittwoch_Curriculum"]
+    if hist.empty or "topic" not in hist.columns or "date" not in hist.columns:
+        return
+
+    hist = hist.copy()
+    hist["date"] = pd.to_datetime(hist["date"], errors="coerce", dayfirst=True)
+    hist = hist[hist["date"].notna()]
+    if hist.empty:
+        return
+
+    # Person column: prefer the cleaned one, fall back to the raw display name.
+    person_col = None
+    for c in ("responsible_clean", "responsible", "person"):
+        if c in hist.columns:
+            person_col = c
+            break
+
+    for _, row in hist.iterrows():
+        topic_norm = _normalize_topic(row.get("topic"))
+        if not topic_norm:
+            continue
+
+        hist_date = row["date"]
+
+        # Restrict to that person's topics when we can identify them. Scoping
+        # the match keeps a mistyped topic from touching someone else's
+        # rotation; if the person is unknown we fall back to a global scan.
+        entries = None
+        if person_col:
+            person_raw = str(row.get(person_col, "") or "")
+            for part in person_raw.split("/"):
+                key = _normalize_name_key(_extract_lastname(part.strip().lower()))
+                if key and key in topic_map:
+                    entries = topic_map[key]
+                    break
+
+        pools = [entries] if entries is not None else list(topic_map.values())
+
+        for pool in pools:
+            matched = False
+            for entry in pool:
+                if _topics_match(entry["thema_norm"], topic_norm):
+                    if hist_date > entry["last_date"]:
+                        entry["last_date"] = hist_date
+                    matched = True
+                    break
+            if matched:
+                break
 
 
 def _pick_topic_for_person(responsible, topic_map, date):
@@ -227,7 +353,8 @@ def _pick_topic_for_person(responsible, topic_map, date):
     Given the selected person's name (e.g. 'hahn markus' or 'h. hahn'),
     find their most overdue topic (oldest last_date) and mark it as used today.
     Returns the topic string, or a flagged fallback if nothing found.
-    ★ = topic not found in sheet — admin should assign one manually.
+    ★ = admin should look at this row -- either the person is not in the
+        sheet, or every topic they have was already used earlier in this run.
     """
     if not responsible or not topic_map:
         return "Mittwochscurriculum ★"
@@ -240,13 +367,22 @@ def _pick_topic_for_person(responsible, topic_map, date):
 
     # Pick the topic with the oldest last_date (most overdue)
     topics.sort(key=lambda t: t["last_date"])
-    chosen = topics[0]
+
+    # Prefer a topic not yet used in this run. If the person is picked more
+    # often than they have topics we must repeat one -- flag it so the repeat
+    # is visible in the document instead of happening silently.
+    fresh     = [t for t in topics if not t.get("used_in_run")]
+    exhausted = not fresh
+    chosen    = (fresh or topics)[0]
 
     # Update in-memory so this topic rotates within this run
-    chosen["last_date"] = pd.Timestamp(date)
+    chosen["last_date"]   = pd.Timestamp(date)
+    chosen["used_in_run"] = True
 
     thema = chosen["thema"]
-    return f"Mittwochscurriculum: {thema}" if thema else "Mittwochscurriculum ★"
+    if not thema:
+        return "Mittwochscurriculum ★"
+    return f"Mittwochscurriculum: {thema}" + (" ★" if exhausted else "")
 
 
 def _find_col(df, candidates):
