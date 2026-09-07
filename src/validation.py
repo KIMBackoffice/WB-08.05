@@ -6,6 +6,7 @@
 import pandas as pd
 
 from src.config import AA_ROLE, INTERMEDIATE_ROLES, SENIOR_ROLES
+from src.selector import MIN_GAP_DAYS_BY_ROLE, MIN_GAP_DAYS_DEFAULT
 
 
 # -------------------------
@@ -37,40 +38,60 @@ def prepare_history(df):
 # Used in check_recent_assignments() to decide whether a person
 # was assigned "too recently" and should be flagged as a validation issue.
 #
-# RECENCY RULES applied per role:
-#   SENIOR (CA/SCA/LA/SFA_I)          → flagged if assigned in the LAST 3 months
-#   INTERMEDIATE (SOA/OA_I/OA_II/SFA_II) → flagged if assigned in the LAST 2 months
-#   AA                                → flagged if assigned in the LAST 1 month
-#   fallback (no role info)           → flagged if assigned in the LAST 1 month
+# SPERR-REGELN (identisch mit selector.MIN_GAP_DAYS_BY_ROLE, in TAGEN):
+#   AA + INTERMEDIATE (SOA/OA_I/OA_II/SFA_II)  → Meldung bei Abstand < 40 Tage
+#   LEITENDE / SENIOR (CA/SCA/LA/SFA_I)        → Meldung bei Abstand < 60 Tage
+#   Rolle unbekannt                            → Fallback 40 Tage
+# Gerechnet wird taggenau gegen die letzte Zuweisung VOR dem Eventdatum,
+# nicht mehr in Kalendermonaten. Damit warnt die Validierung exakt dort, wo
+# der Algorithmus auch sperrt.
 #
 # EVENT              SOURCE FILE     ROLE POOL
-# COD_SENIOR         tuesday.py      SENIOR        EXEMPT — bound to S-Dienst, no recency rule
-# COD_JUNIOR         tuesday.py      AA            (1-month rule)
-# PEER               tuesday.py      AA            (1-month rule)
-# PHYSIO             tuesday.py      AA            (1-month rule)
-# Journal_Club       friday.py       INTERMEDIATE + AA  (2-month / 1-month)
-# Mittwoch_Curriculum wednesday.py   INTERMEDIATE  (2-month rule)
+# COD_SENIOR         tuesday.py      SENIOR        AUSGENOMMEN — an S-Dienst gebunden, keine Sperre
+# COD_JUNIOR         tuesday.py      AA
+# PEER               tuesday.py      AA
+# PHYSIO             tuesday.py      AA
+# Journal_Club       friday.py       INTERMEDIATE + AA
+# Mittwoch_Curriculum wednesday.py   INTERMEDIATE
 # -------------------------
 HISTORY_RELEVANT_EVENTS = {
-    "COD_JUNIOR",          # tuesday.py — AA     — 1-month recency rule
-    "PEER",                # tuesday.py — AA     — 1-month recency rule
-    "PHYSIO",              # tuesday.py — AA     — 1-month recency rule
-    "Journal_Club",        # friday.py  — INTERMEDIATE + AA — 2/1-month rule
-    "Mittwoch_Curriculum", # wednesday.py — INTERMEDIATE  — 2-month rule
+    "COD_JUNIOR",          # tuesday.py   — AA
+    "PEER",                # tuesday.py   — AA
+    "PHYSIO",              # tuesday.py   — AA
+    "Journal_Club",        # friday.py    — AA + INTERMEDIATE
+    "Mittwoch_Curriculum", # wednesday.py — INTERMEDIATE
 }
+
+# Platzhalter aus friday.py (leerer Slot) — nie als Person pruefen.
+_PLACEHOLDER_PERSONS = {"", "tbd", "— tbd —", "- tbd -", "nan", "none"}
 
 
 # -------------------------
 # CHECK RECENT ASSIGNMENTS
 # -------------------------
 def check_recent_assignments(current, history, pep_df=None):
+    """
+    Meldet Zuweisungen, die die Sperre verletzen.
+
+    Taggenau: fuer jede geplante Zuweisung wird die letzte historische
+    Zuweisung VOR dem Eventdatum gesucht und der Abstand in Tagen gegen
+    MIN_GAP_DAYS_BY_ROLE geprueft (AA/OA 40 Tage, Leitende 60 Tage).
+    """
 
     if history is None or history.empty:
         return pd.DataFrame()
 
     history = prepare_history(history)
 
-    # Build role lookup from PEP so we can classify people without history role_code
+    # Nur Events, die ueberhaupt einer Sperre unterliegen (S-COD ausgenommen)
+    if "event_type" in history.columns:
+        history = history[history["event_type"].isin(HISTORY_RELEVANT_EVENTS)]
+    history = history[history["date"].notna()]
+
+    if history.empty:
+        return pd.DataFrame()
+
+    # Rollen-Lookup aus PEP, falls die History keinen role_code fuehrt
     pep_role_lookup = {}
     if pep_df is not None and not pep_df.empty:
         from src.utils_names import extract_lastname as _el
@@ -82,11 +103,6 @@ def check_recent_assignments(current, history, pep_df=None):
 
     issues = []
 
-    current_month    = current["date"].dt.to_period("M").iloc[0]
-    last_month       = current_month - 1
-    two_months_ago   = current_month - 2
-    three_months_ago = current_month - 3
-
     for _, row in current.iterrows():
 
         if row["event_type"] not in HISTORY_RELEVANT_EVENTS:
@@ -95,19 +111,31 @@ def check_recent_assignments(current, history, pep_df=None):
         if pd.isna(row["responsible"]):
             continue
 
+        event_date = pd.Timestamp(row["date"]).normalize()
+
         persons = [
             p.strip().lower()
-            for p in row["responsible"].split("/")
+            for p in str(row["responsible"]).split("/")
         ]
 
         for p in persons:
+
+            if p in _PLACEHOLDER_PERSONS:
+                continue
 
             hist = history[history["responsible_clean"] == p]
 
             if hist.empty:
                 continue
 
-            # get latest known role: prefer history, fall back to PEP lookup
+            # letzte Zuweisung VOR dem Eventdatum
+            past = hist[hist["date"].dt.normalize() < event_date]
+            if past.empty:
+                continue
+            last_date = past["date"].max().normalize()
+            gap_days  = (event_date - last_date).days
+
+            # Rolle: History bevorzugt, sonst PEP
             role = None
             if "role_code" in hist.columns:
                 r_val = hist.sort_values("date").iloc[-1]["role_code"]
@@ -117,63 +145,30 @@ def check_recent_assignments(current, history, pep_df=None):
                 from src.utils_names import extract_lastname as _el
                 role = pep_role_lookup.get(_el(p))
 
-            last1_count = (hist["month"] == last_month).sum()
+            limit = MIN_GAP_DAYS_BY_ROLE.get(role, MIN_GAP_DAYS_DEFAULT)
 
-            last2_count = hist["month"].isin(
-                [last_month, two_months_ago]
-            ).sum()
+            if gap_days >= limit:
+                continue
 
-            last3_count = hist["month"].isin(
-                [last_month, two_months_ago, three_months_ago]
-            ).sum()
-
-            # -------------------------
-            # RECENCY RULES BY ROLE
-            # -------------------------
-
-            # 🔴 SENIOR (CA / SCA / LA / SFA_I) → 3 months
             if role in SENIOR_ROLES:
-                if last3_count >= 1:
-                    issues.append({
-                        "type": "Senior too recent",
-                        "person": p,
-                        "event": row["event_type"],
-                        "date": row["date"],
-                        "message": f"{p} ({role}) — wurde in den letzten 3 Monaten eingeplant"
-                    })
-
-            # 🟡 INTERMEDIATE (SOA / OA_I / OA_II / SFA_II) → 2 months
+                itype, rolle_txt = "Senior too recent", role
             elif role in INTERMEDIATE_ROLES:
-                if last2_count >= 1:
-                    issues.append({
-                        "type": "Intermediate too recent",
-                        "person": p,
-                        "event": row["event_type"],
-                        "date": row["date"],
-                        "message": f"{p} ({role}) — wurde in den letzten 2 Monaten eingeplant"
-                    })
-
-            # 🟢 AA → 1 month
+                itype, rolle_txt = "Intermediate too recent", role
             elif role in AA_ROLE:
-                if last1_count >= 1:
-                    issues.append({
-                        "type": "AA too recent",
-                        "person": p,
-                        "event": row["event_type"],
-                        "date": row["date"],
-                        "message": f"{p} ({role}) — wurde letzten Monat eingeplant"
-                    })
-
-            # fallback: role unknown → 1 month
+                itype, rolle_txt = "AA too recent", role
             else:
-                if last1_count >= 1:
-                    issues.append({
-                        "type": "Recent assignment",
-                        "person": p,
-                        "event": row["event_type"],
-                        "date": row["date"],
-                        "message": f"{p} (Rolle unbekannt) — war letzten Monat bereits eingeplant"
-                    })
+                itype, rolle_txt = "Recent assignment", "Rolle unbekannt"
+
+            issues.append({
+                "type":    itype,
+                "person":  p,
+                "event":   row["event_type"],
+                "date":    row["date"],
+                "message": (
+                    f"{p} ({rolle_txt}) — nur {gap_days} Tage seit "
+                    f"{last_date.strftime('%d.%m.%Y')}, Sperre {limit} Tage"
+                ),
+            })
 
     return pd.DataFrame(issues)
 
