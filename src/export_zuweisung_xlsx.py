@@ -11,7 +11,7 @@ Pro Zeile:
   · Zugewiesene Person + PEP-Rolle + Fellow/Rotation + Dienstcode + Dienstname
   · Letzte Zuweisung (aus History + bereits geplanten Monaten)
   · Nächste Zuweisung (aus dem Mehrmonatsplan)
-  · Abstands-Checks (>30 Tage seit letzter / seit Arbeitsbeginn / bis nächster)
+  · Sperr-Checks (rollenabhaengig: AA 30 / OA 40 / Leitende 60 Tage)
   · Bis zu 7 Alternativkandidaten mit Prio-Stufe, Rolle, Tagesdienst,
     letzter und nächster Zuweisung
 
@@ -64,10 +64,15 @@ EVENT_LABEL = {
 
 # Slot-Bezeichnung je Event (Reihenfolge = Reihenfolge in EVENT_DUTY_RULES)
 SLOT_LABEL = {
-    "Journal_Club": ["OA / Int.", "AA"],
+    "Journal_Club": ["AA", "OA / Int."],   # Reihenfolge wie friday.py: AA zuerst
 }
 
-_GAP_DAYS = 30
+# Sperre pro Rolle — EINE Quelle, identisch mit dem Scheduler.
+from src.selector import MIN_GAP_DAYS_BY_ROLE, MIN_GAP_DAYS_DEFAULT
+
+
+def _gap_for_role(role) -> int:
+    return MIN_GAP_DAYS_BY_ROLE.get(role, MIN_GAP_DAYS_DEFAULT)
 
 
 # ── kleine Helfer ──────────────────────────────────────────────────────────
@@ -273,6 +278,8 @@ def build_zuweisung_rows(
             days_until = (next_a["date"] - day).days if next_a else None
             days_start = (day - first_pep).days if first_pep is not None else None
 
+            _gap_limit = _gap_for_role(role)
+
             rec = {
                 "monat":            _MONTH_NAMES.get(day.month, str(day.month)),
                 "datum":            _fmt_date(day),
@@ -298,18 +305,19 @@ def build_zuweisung_rows(
                 "letzte_zuw_thema":   _s(last_a["topic"]) if last_a else "",
                 "letzte_zuw_quelle":  last_a["source"] if last_a else "",
                 "tage_seit_letzter":  days_since if days_since is not None else "",
-                "check_30d_letzte":   _jn(days_since > _GAP_DAYS) if days_since is not None else "—",
+                "sperre_tage":        _gap_limit,
+                "check_sperre_letzte": _jn(days_since >= _gap_limit) if days_since is not None else "—",
 
                 "naechste_zuw":       _jn(next_a is not None),
                 "naechste_zuw_datum": _fmt_date(next_a["date"]) if next_a else "",
                 "naechste_zuw_event": EVENT_CODE.get(next_a["event_type"], next_a["event_type"]) if next_a else "",
                 "naechste_zuw_thema": _s(next_a["topic"]) if next_a else "",
                 "tage_bis_naechster": days_until if days_until is not None else "",
-                "check_30d_naechste": _jn(days_until > _GAP_DAYS) if days_until is not None else "—",
+                "check_sperre_naechste": _jn(days_until >= _gap_limit) if days_until is not None else "—",
 
                 "erster_pep_eintrag":      _fmt_date(first_pep) if first_pep is not None else "",
                 "tage_seit_arbeitsbeginn": days_start if days_start is not None else "",
-                "check_30d_arbeitsbeginn": _jn(days_start > _GAP_DAYS) if days_start is not None else "—",
+                "check_sperre_arbeitsbeginn": _jn(days_start >= _gap_limit) if days_start is not None else "—",
             }
 
             # ── Alternativkandidaten ──────────────────────────────────────
@@ -354,12 +362,13 @@ _HEADERS_DE = {
     "dienst_bezeichnung": "Dienst",
     "letzte_zuw_datum": "Letzte Zuw. Datum", "letzte_zuw_event": "Letzte Zuw. Event",
     "letzte_zuw_thema": "Letzte Zuw. Thema", "letzte_zuw_quelle": "Quelle",
-    "tage_seit_letzter": "Tage seit letzter", "check_30d_letzte": ">30d seit letzter",
+    "tage_seit_letzter": "Tage seit letzter", "sperre_tage": "Sperre (Tage)",
+    "check_sperre_letzte": "Sperre ok (letzte)",
     "naechste_zuw": "Nächste Zuw.", "naechste_zuw_datum": "Nächste Zuw. Datum",
     "naechste_zuw_event": "Nächste Zuw. Event", "naechste_zuw_thema": "Nächste Zuw. Thema",
-    "tage_bis_naechster": "Tage bis nächster", "check_30d_naechste": ">30d bis nächster",
+    "tage_bis_naechster": "Tage bis nächster", "check_sperre_naechste": "Sperre ok (nächste)",
     "erster_pep_eintrag": "1. PEP-Eintrag", "tage_seit_arbeitsbeginn": "Tage seit Start",
-    "check_30d_arbeitsbeginn": ">30d seit Start",
+    "check_sperre_arbeitsbeginn": "Sperre ok (Start)",
 }
 
 for _k in range(1, MAX_CANDIDATES + 1):
@@ -414,7 +423,7 @@ def build_zuweisung_xlsx(
         c.border = border
         c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-    check_cols = {"check_30d_letzte", "check_30d_naechste", "check_30d_arbeitsbeginn"}
+    check_cols = {"check_sperre_letzte", "check_sperre_naechste", "check_sperre_arbeitsbeginn"}
 
     for i, (_, r) in enumerate(df.iterrows(), start=2):
         cand_row = (i % 2 == 0)
@@ -438,10 +447,11 @@ def build_zuweisung_xlsx(
         "person": 20, "person_pep": 20, "rolle_pep": 8, "funktion_detail": 13,
         "dienst_code": 10, "dienst_bezeichnung": 18,
         "letzte_zuw_datum": 13, "letzte_zuw_event": 13, "letzte_zuw_thema": 28,
-        "letzte_zuw_quelle": 9, "tage_seit_letzter": 11, "check_30d_letzte": 13,
+        "letzte_zuw_quelle": 9, "tage_seit_letzter": 11, "sperre_tage": 8,
+        "check_sperre_letzte": 14,
         "naechste_zuw": 10, "naechste_zuw_datum": 14, "naechste_zuw_event": 14,
-        "naechste_zuw_thema": 28, "tage_bis_naechster": 12, "check_30d_naechste": 14,
-        "erster_pep_eintrag": 13, "tage_seit_arbeitsbeginn": 12, "check_30d_arbeitsbeginn": 14,
+        "naechste_zuw_thema": 28, "tage_bis_naechster": 12, "check_sperre_naechste": 15,
+        "erster_pep_eintrag": 13, "tage_seit_arbeitsbeginn": 12, "check_sperre_arbeitsbeginn": 15,
     }
     for j, col in enumerate(cols, start=1):
         if col.startswith("k") and col[1].isdigit():
@@ -471,7 +481,8 @@ def build_zuweisung_xlsx(
         ("Dienst", "Dienstcode und Dienstbezeichnung aus PEP am Veranstaltungstag."),
         ("Letzte Zuw.", "Letzte Zuweisung vor diesem Datum — aus History-Sheet oder bereits geplanten Monaten (Spalte Quelle)."),
         ("Nächste Zuw.", "Nächste Zuweisung nach diesem Datum aus dem Mehrmonatsplan. Nur so weit, wie PEP-Daten vorhanden sind."),
-        (">30d-Checks", "JA = Abstand grösser als 30 Tage (ok). NEIN = zu knapp (gelb). — = keine Vergleichsdaten."),
+        ("Sperre (Tage)", "Rollenabhaengige Sperrfrist: AA 30, OA/Intermediate 40, Leitende 60 Tage."),
+        ("Sperre-ok-Checks", "JA = Abstand mindestens so gross wie die Sperre. NEIN = zu knapp (gelb). — = keine Vergleichsdaten."),
         ("K1–K7", "Alternativkandidaten in Prio-Reihenfolge (Prio 1 = beste Dienstgruppe), inkl. deren letzter/nächster Zuweisung."),
         ("Hinweis", "Nur algorithmisch zugewiesene Events (COD, PEER, PHYSIO, MI, JC). Sheet-basierte Events sind nicht enthalten."),
     ]
