@@ -27,13 +27,12 @@ from src.ui        import doc_loader, banner
 from src.fairness  import clear_alternatives_cache
 from src.config import CONFIG_WARNINGS, CONFIG_SOURCE
 from src.data_loader import (
-    load_simulation, load_physio, load_imc_updates, load_teaching_tuesday,
+    load_simulation, load_imc_updates, load_teaching_tuesday,
     load_mittwoch, load_bedside, load_trauma_board, load_pep_clean, load_tte,
     load_masterclass, load_sheet, load_montagscurriculum,
     load_pflegeassistenten, load_sitzungen, load_diverse, load_fpr,
     load_fokus_intensivpflege,
     load_epic_update, load_fachentwicklung, load_history,
-    load_physio_topics, get_next_physio_topic, save_physio_topic_date,
     load_overrides, apply_overrides, sync_aa_registry,
 )
 from src.pipeline import generate_full_schedule_aware, generate_sheet_only_schedule, clear_aware_cache
@@ -151,7 +150,6 @@ def load_all_data():
     """Load all Google Sheets. Errors per-sheet so one failure doesn't crash all."""
     SHEET_LOADERS = [
         ("sim",               load_simulation,           "SIM_URL"),
-        ("physio",            load_physio,               "PHYSIO_URL"),
         ("imc",               load_imc_updates,          "IMC_URL"),
         ("teaching",          load_teaching_tuesday,     "TEACHING_URL"),
         ("mittwoch_topics",   load_sheet,                "MITTWOCH_TOPICS_URL"),
@@ -171,7 +169,6 @@ def load_all_data():
         ("fokus",             load_fokus_intensivpflege, "FOKUS_URL"),
         ("epic",              load_epic_update,          "EPIC_URL"),
         ("fachentwicklung",   load_fachentwicklung,      "FACHENTWICKLUNG_URL"),
-        ("physio_topics",     load_physio_topics,        "PHYSIO_TOPICS_URL"),
     ]
     data   = {}
     failed = []
