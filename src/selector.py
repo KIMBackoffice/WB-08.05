@@ -9,26 +9,27 @@ from src.utils_names import extract_lastname as _extract_lastname
 
 
 # =========================
-# MINIMUM GAP BETWEEN ASSIGNMENTS
-# Hard filter — mirrors validation.py recency rules exactly:
-#   AA:           blocked if assigned within last 1 month (~30 days)
-#   INTERMEDIATE: blocked if assigned within last 2 months (~60 days)
-#   SENIOR:       blocked if assigned within last 3 months (~91 days)
-# Applied only when at least one unblocked alternative exists.
-# If everyone is blocked (tiny pool), filter is skipped so slot is never empty.
+# MINIMUM GAP BETWEEN ASSIGNMENTS ("Sperre")
+# Hard filter, gilt fuer alle algorithmischen Events (JC, MI, PEER,
+# COD_JUNIOR, PHYSIO). S-COD ist ausgenommen (siehe pick_s_dienst).
+#   AA + OA/Intermediate (SOA, OA_I, OA_II, SFA_II):  40 Tage
+#   Leitende / Senior    (CA, SCA, LA, SFA_I):        60 Tage
+# Wenn in einem erlaubten Dienst-Tier niemand die Sperre einhaelt, wird das
+# naechste Tier probiert; ergibt kein Tier einen Kandidaten, bleibt der Slot
+# LEER (none-over-force) — niemand wird innerhalb seiner Sperre eingeteilt.
 # =========================
 MIN_GAP_DAYS_BY_ROLE = {
-    "AA":     60,   # 1 month
-    "SOA":    60,   # 2 months — INTERMEDIATE
-    "OA_I":   60,
-    "OA_II":  60,
-    "SFA_II": 60,
-    "CA":     60,   # 3 months — SENIOR
+    "AA":     40,
+    "SOA":    40,   # INTERMEDIATE
+    "OA_I":   40,
+    "OA_II":  40,
+    "SFA_II": 40,
+    "CA":     60,   # LEITENDE / SENIOR
     "SCA":    60,
     "LA":     60,
     "SFA_I":  60,
 }
-MIN_GAP_DAYS_DEFAULT = 60  # fallback for unknown roles
+MIN_GAP_DAYS_DEFAULT = 40  # fallback for unknown roles
 
 # =========================
 # EARLIEST ASSIGNMENT GUARD
@@ -55,7 +56,7 @@ class SmartFairSelector:
         self.assignment_counts = {}
         self.last_assigned     = {}
         # Cross-month HARD-gap memory, keyed by LASTNAME (same key format as
-        # history_counts). Populated from history_df below so the 60-day
+        # history_counts). Populated from history_df below so the 40-day
         # Sperre is enforced against PREVIOUS months, not just within this
         # generation run. self.last_assigned (keyed by name_clean) still
         # tracks picks made during THIS run; _recently_assigned() checks both.
@@ -104,7 +105,7 @@ class SmartFairSelector:
         # COD_SENIOR is DELIBERATELY NOT in this set. S-COD is not a fairness
         # event: it is bound to whoever holds S-Dienst (823) on the day, so a
         # past S-COD must neither penalise a person's score nor trigger the
-        # hard 60-day gap for any other event. See pick_s_dienst() below.
+        # harte Sperre for any other event. See pick_s_dienst() below.
         HISTORY_RELEVANT_EVENTS = {
             "COD_JUNIOR", "PEER", "PHYSIO",
             "Journal_Club", "Mittwoch_Curriculum",
@@ -161,7 +162,7 @@ class SmartFairSelector:
                             self.history_counts.get(lastname, 0) + weight
                         )
                         # Track the MOST RECENT historical date per lastname so
-                        # the hard 60-day gap can see across months. Unlike the
+                        # the hard gap can see across months. Unlike the
                         # weighted score above, this is NOT decayed — we keep the
                         # latest real assignment date regardless of how old it is,
                         # and _recently_assigned() decides if it's within the gap.
@@ -326,7 +327,7 @@ class SmartFairSelector:
             return None
 
         # 4. Minimum gap between assignments (role-aware)
-        # AA: blocked within 30 days | Intermediate: 60 | Senior: 91
+        # Sperre: 40d fuer AA/OA, 60d fuer Leitende (MIN_GAP_DAYS_BY_ROLE).
         df_roles = dict(zip(df["name_clean"], df.get("role_code", pd.Series(dtype=str))))
 
         def _gap_days_for(name):
@@ -497,7 +498,7 @@ def pick_s_dienst(pep_df, date, s_dienst, roles=None):
       bypasses the fairness selector completely:
 
         * NO minimum-gap / recency filter  — the same senior may hold S-COD in
-          consecutive months. The 60-day senior gap used to empty this slot
+          consecutive months. The senior gap used to empty this slot
           whenever one person had S-Dienst on two consecutive first Tuesdays.
         * NO fairness scoring, NO history load.
         * NO tracking — the pick is NOT written into the selector's
@@ -584,7 +585,7 @@ def pick_leading_role_empty_day(pep_df, date, selector, leading_roles, exclude=N
 
     # Fair scoring; hard_gap=False is acceptable here because this is already
     # the explicit last resort AND these people are rarely assigned, so the
-    # 91-day senior gap would otherwise almost always block them. We still
+    # 40-day gap would otherwise often block them. We still
     # only ever pick from genuinely-free people.
     return selector.pick(cand, date, exclude=exclude, hard_gap=False)
 
