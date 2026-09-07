@@ -121,7 +121,7 @@ def _all_tests():
         pep = _empty_pep()
         for month in range(1, 13):
             cal = _make_calendar(2026, month)
-            df = build_tuesday_schedule(cal, pep, pep, sel)
+            df = build_tuesday_schedule(cal, pep, sel)
             if df.empty:
                 continue
             pos1 = cal[(cal["weekday"] == "Tuesday") & (cal["weekday_position"] == 1)]
@@ -139,7 +139,7 @@ def _all_tests():
         cal = _make_calendar(2026, 8)
         sel = SmartFairSelector()
         pep = _empty_pep()
-        df = build_tuesday_schedule(cal, pep, pep, sel)
+        df = build_tuesday_schedule(cal, pep, sel)
         tues = cal[cal["weekday"] == "Tuesday"]
         expected = {1: "COD_SENIOR", 2: "PHYSIO", 3: "PEER", 4: "COD_JUNIOR", 5: "PEER"}
         for _, row in tues.iterrows():
@@ -159,7 +159,7 @@ def _all_tests():
         cal = _make_calendar(2026, 7)
         sel = SmartFairSelector()
         pep = _empty_pep()
-        df = build_tuesday_schedule(cal, pep, pep, sel)
+        df = build_tuesday_schedule(cal, pep, sel)
         tues = cal[cal["weekday"] == "Tuesday"]
         expected = {1: "COD_SENIOR", 2: "PEER", 3: "COD_JUNIOR", 4: "PEER", 5: "COD_JUNIOR"}
         for _, row in tues.iterrows():
@@ -179,44 +179,35 @@ def _all_tests():
         cal = _make_calendar(2026, 7)
         sel = SmartFairSelector()
         pep = _empty_pep()
-        df = build_tuesday_schedule(cal, pep, pep, sel)
+        df = build_tuesday_schedule(cal, pep, sel)
         for _, row in df.iterrows():
             assert row["time"] == "11:30-11:45", f"Falsche Zeit: {row['time']}"
             assert row["room"] == "INO E218", f"Falscher Raum: {row['room']}"
     t("A4", "Tuesday", "Zeit + Raum konstant", "Alle Dienstag-Events: Zeit='11:30-11:45', Raum='INO E218'.", A4)
 
     def A5():
-        """PHYSIO topics rotate: 3 months → 3 different papers."""
+        """PHYSIO-Titel ist immer exakt 'Physio Talk' — kein Themen-Sheet mehr."""
         from src.scheduler.tuesday import build_tuesday_schedule
         from src.selector import SmartFairSelector
-        topics = pd.DataFrame([
-            {"nr": i, "artikel": f"Paper {i}", "last_presented": pd.Timestamp("2020-01-01")} for i in range(1, 6)
-        ])
-        picked: set = set()
         sel = SmartFairSelector()
         pep = _empty_pep()
-        results = []
+        found = 0
         for month in [6, 8, 10]:
             cal = _make_calendar(2026, month)
-            df = build_tuesday_schedule(cal, pep, pep, sel, physio_topics_df=topics, already_picked_physio_nrs=picked)
+            df = build_tuesday_schedule(cal, pep, sel)
             for _, r in df[df["event_type"] == "PHYSIO"].iterrows():
-                results.append(r["topic"])
-        assert len(results) > 0, "Keine PHYSIO-Rows gefunden"
-        assert len(results) == len(set(results)), f"Physio-Themen nicht eindeutig: {results}"
-    t("A5", "Tuesday", "PHYSIO-Themen rotieren", "3 aufeinanderfolgende PHYSIO-Slots wählen je ein anderes Paper.", A5)
+                assert r["topic"] == "Physio Talk", f"Unerwarteter PHYSIO-Titel: {r['topic']}"
+                found += 1
+        assert found > 0, "Keine PHYSIO-Rows gefunden"
+    t("A5", "Tuesday", "PHYSIO-Titel fix", "PHYSIO-Slots tragen immer 'Physio Talk', ohne Artikel im Titel.", A5)
 
     def A6():
-        """PHYSIO without topics_df → fallback 'Physio Talk', no crash."""
-        from src.scheduler.tuesday import build_tuesday_schedule
-        from src.selector import SmartFairSelector
-        cal = _make_calendar(2026, 6)
-        sel = SmartFairSelector()
-        pep = _empty_pep()
-        df = build_tuesday_schedule(cal, pep, pep, sel, physio_topics_df=None)
-        physio = df[df["event_type"] == "PHYSIO"]
-        assert not physio.empty, "Kein PHYSIO-Row wenn topics=None"
-        assert "Physio" in physio.iloc[0]["topic"]
-    t("A6", "Tuesday", "PHYSIO-Fallback ohne Topics", "Wenn keine topics_df vorhanden → Fallback 'Physio Talk', kein Absturz.", A6)
+        """Physio-Sheets sind vollstaendig entfernt (keine Loader mehr)."""
+        import src.data_loader as dl
+        for fn in ("load_physio", "load_physio_topics",
+                   "get_next_physio_topic", "save_physio_topic_date"):
+            assert not hasattr(dl, fn), f"{fn}() existiert noch in data_loader"
+    t("A6", "Tuesday", "Kein Physio-Themen-Sheet", "load_physio/load_physio_topics/get_next_physio_topic/save_physio_topic_date sind entfernt.", A6)
 
     def A7():
         """COD_SENIOR only picks CA on S_DIENST (823), never AA."""
@@ -229,7 +220,7 @@ def _all_tests():
             _make_pep_row("schmidt ca", "CA", 823, first_tue),
         ])
         sel = SmartFairSelector()
-        df = build_tuesday_schedule(cal, pep, pep, sel)
+        df = build_tuesday_schedule(cal, pep, sel)
         cod = df[df["event_type"] == "COD_SENIOR"]
         assert not cod.empty
         assert cod.iloc[0]["responsible"] == "schmidt ca", \
@@ -249,7 +240,7 @@ def _all_tests():
         pep = _make_pep(pep_rows)
         aa_map = {"bertschi rotation": "rotation", "hochgruber fellow": "fellow"}
         sel = SmartFairSelector(aa_type_map=aa_map)
-        df = build_tuesday_schedule(cal, pep, pep, sel)
+        df = build_tuesday_schedule(cal, pep, sel)
         peer = df[df["event_type"] == "PEER"]
         physio = df[df["event_type"] == "PHYSIO"]
         if not peer.empty:
@@ -272,7 +263,7 @@ def _all_tests():
                 cal = _make_calendar(year, month)
                 if cal.empty:
                     continue
-                df = build_tuesday_schedule(cal, pep, pep, sel)
+                df = build_tuesday_schedule(cal, pep, sel)
                 for _, row in df.iterrows():
                     ts = pd.Timestamp(row["date"]).normalize()
                     assert ts not in FEIERTAGE_DATES, f"Algorithmus-Event an Feiertag: {ts}"
@@ -692,6 +683,8 @@ def _all_tests():
         for c in [1072, 113, 719, 741]: assert c in TAGDIENST_AA, f"TAGDIENST_AA fehlt {c}"
         for c in [102, 271, 166]:       assert c in SPAETDIENST, f"SPAETDIENST fehlt {c}"
         for c in [117, 705]:            assert c in BUERO_FORSCHUNG_OA, f"BUERO fehlt {c}"
+        assert 100 not in BUERO_FORSCHUNG_OA, "Code 100 (B) darf bei OA NIE zugelassen sein"
+        assert 100 in TAGDIENST_AA, "Code 100 (B = Transportdienst) muss bei AA zugelassen sein"
         for c in [101, 119, 165]:       assert c in TAGDIENST_OA, f"TAGDIENST_OA fehlt {c}"
     t("E12", "Selector", "Pool-Codes vollständig", "Alle dokumentierten Duty-Codes in den richtigen Pool-Sets vorhanden.", E12)
 
@@ -790,18 +783,18 @@ def _all_tests():
     t("G3", "Validation", "Kein False-Positive bei sauberem Schedule", "Verschiedene Zeiten pro Event → check_overlaps() gibt leeres DataFrame zurück.", G3)
 
     def G4():
-        """AA recency: flagged if assigned last month; not flagged 3 months ago."""
+        """AA-Sperre 40 Tage: 36 Tage Abstand -> Flag, 97 Tage -> kein Flag."""
         from src.validation import check_recent_assignments
         current_month = pd.Period("2026-07")
         last_month    = current_month - 1
         current = pd.DataFrame([{"date": pd.Timestamp("2026-07-07"), "event_type": "COD_JUNIOR", "responsible": "b. testperson"}])
         hist_recent = pd.DataFrame([{"date": pd.Timestamp(last_month.start_time), "responsible_clean": "b. testperson", "event_type": "COD_JUNIOR", "role_code": "AA"}])
         r1 = check_recent_assignments(current, hist_recent)
-        assert not r1.empty, "AA letzten Monat soll geflaggt werden"
+        assert not r1.empty, "AA innerhalb 40 Tagen soll geflaggt werden"
         hist_old = pd.DataFrame([{"date": pd.Timestamp((current_month - 3).start_time), "responsible_clean": "b. testperson", "event_type": "COD_JUNIOR", "role_code": "AA"}])
         r2 = check_recent_assignments(current, hist_old)
-        assert r2.empty, "AA vor 3 Monaten soll NICHT geflaggt werden"
-    t("G4", "Validation", "AA Recency-Regel (1 Monat)", "AA letzten Monat → geflaggt. AA vor 3 Monaten → nicht geflaggt.", G4)
+        assert r2.empty, "AA ausserhalb 40 Tagen soll NICHT geflaggt werden"
+    t("G4", "Validation", "AA Sperre (40 Tage)", "AA mit 36 Tagen Abstand → geflaggt. AA mit 97 Tagen → nicht geflaggt.", G4)
 
     def G5():
         """>5 assignments flagged; ==5 not flagged."""
@@ -1120,7 +1113,7 @@ def _all_tests():
         cal = _make_calendar(2026, 7)
         sel = SmartFairSelector()
         pep = _empty_pep()
-        df = build_tuesday_schedule(cal, pep, pep, sel)
+        df = build_tuesday_schedule(cal, pep, sel)
         dups = df.groupby(["date", "event_type"]).size()
         dups = dups[dups > 1]
         assert dups.empty, f"Duplizierte (date, event_type) gefunden:\n{dups}"
