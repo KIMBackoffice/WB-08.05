@@ -62,7 +62,7 @@ def build_topic_map(topics_df, history_df=None):
 
     Build this ONCE per planning run and hand it to every
     build_wednesday_schedule() call, so topic rotation survives the month
-    loop (mirrors the _physio_picked set in pipeline.py).
+    loop (topic rotation within this run).
     """
     topic_map = _build_topic_map(topics_df)
     _seed_from_history(topic_map, history_df)
