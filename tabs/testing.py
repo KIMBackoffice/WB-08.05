@@ -783,18 +783,30 @@ def _all_tests():
     t("G3", "Validation", "Kein False-Positive bei sauberem Schedule", "Verschiedene Zeiten pro Event → check_overlaps() gibt leeres DataFrame zurück.", G3)
 
     def G4():
-        """AA-Sperre 40 Tage: 36 Tage Abstand -> Flag, 97 Tage -> kein Flag."""
+        """Rollenabhaengige Sperre: AA 30 Tage, Intermediate 40 Tage."""
         from src.validation import check_recent_assignments
-        current_month = pd.Period("2026-07")
-        last_month    = current_month - 1
-        current = pd.DataFrame([{"date": pd.Timestamp("2026-07-07"), "event_type": "COD_JUNIOR", "responsible": "b. testperson"}])
-        hist_recent = pd.DataFrame([{"date": pd.Timestamp(last_month.start_time), "responsible_clean": "b. testperson", "event_type": "COD_JUNIOR", "role_code": "AA"}])
-        r1 = check_recent_assignments(current, hist_recent)
-        assert not r1.empty, "AA innerhalb 40 Tagen soll geflaggt werden"
-        hist_old = pd.DataFrame([{"date": pd.Timestamp((current_month - 3).start_time), "responsible_clean": "b. testperson", "event_type": "COD_JUNIOR", "role_code": "AA"}])
-        r2 = check_recent_assignments(current, hist_old)
-        assert r2.empty, "AA ausserhalb 40 Tagen soll NICHT geflaggt werden"
-    t("G4", "Validation", "AA Sperre (40 Tage)", "AA mit 36 Tagen Abstand → geflaggt. AA mit 97 Tagen → nicht geflaggt.", G4)
+        event_day = pd.Timestamp("2026-07-07")
+
+        def _hist(last_date, role):
+            return pd.DataFrame([{
+                "date": pd.Timestamp(last_date), "responsible_clean": "b. testperson",
+                "event_type": "COD_JUNIOR", "role_code": role,
+            }])
+
+        cur_aa = pd.DataFrame([{"date": event_day, "event_type": "COD_JUNIOR", "responsible": "b. testperson"}])
+        # AA: 21 Tage Abstand -> Flag, 36 Tage -> kein Flag (Sperre 30)
+        assert not check_recent_assignments(cur_aa, _hist("2026-06-16", "AA")).empty, \
+            "AA mit 21 Tagen Abstand soll geflaggt werden"
+        assert check_recent_assignments(cur_aa, _hist("2026-06-01", "AA")).empty, \
+            "AA mit 36 Tagen Abstand soll NICHT geflaggt werden"
+
+        cur_oa = pd.DataFrame([{"date": event_day, "event_type": "Journal_Club", "responsible": "b. testperson"}])
+        # Intermediate: dieselben 36 Tage -> Flag (Sperre 40)
+        assert not check_recent_assignments(cur_oa, _hist("2026-06-01", "OA_I")).empty, \
+            "OA mit 36 Tagen Abstand soll geflaggt werden"
+        assert check_recent_assignments(cur_oa, _hist("2026-05-01", "OA_I")).empty, \
+            "OA mit 67 Tagen Abstand soll NICHT geflaggt werden"
+    t("G4", "Validation", "Sperre rollenabhängig (AA 30 / OA 40)", "Dieselben 36 Tage Abstand: AA ok, OA geflaggt.", G4)
 
     def G5():
         """>5 assignments flagged; ==5 not flagged."""
