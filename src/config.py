@@ -62,7 +62,7 @@ TAGDIENST_AA = {
     719,   # AA | Tagdienst Neuro IMC
     721,   # AA | Tagdienst Zone IMC Viszeral
     741,   # AA | Forschung AA
-    100,   # AA | B, best dienst potentially for AA  Tag
+    100,   # AA | B = Transportdienst AA — sehr gut geeignet, viel Zeit
 }
 
 # OA Tagdienst — OA pool
@@ -73,10 +73,11 @@ TAGDIENST_OA = {
 }
 
 # Büro / Forschung — OA pool
+# Code 100 (B / EKG-Dienst) ist hier BEWUSST NICHT enthalten: OA auf B werden
+# nie eingeteilt. Bei AA ist B (100) dagegen erlaubt und in TAGDIENST_AA.
 BUERO_FORSCHUNG_OA = {
     117,   # OA | Bürotag
     705,   # OA | Forschung OA
-    100,   # OA | B EKG Dienst
 }
 
 # S-Dienst — Senior pool, used for COD_SENIOR selection only.
