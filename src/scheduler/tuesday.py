@@ -1,7 +1,6 @@
 # src/scheduler/tuesday.py
 
 import pandas as pd
-from src.data_loader import get_next_physio_topic
 
 from src.config import (
     SENIOR_ROLES,
@@ -12,20 +11,16 @@ from src.config import (
 from src.selector import pick_person_fair, pick_s_dienst
 
 
-def build_tuesday_schedule(calendar_df, physio_df, pep_df, selector,
-                           physio_start_index=0, physio_topics_df=None,
-                           already_picked_physio_nrs=None,
+def build_tuesday_schedule(calendar_df, pep_df, selector,
                            override_slots=None,
                            override_date_map=None):
     """
     Tuesday: COD_SENIOR / COD_JUNIOR / PEER / PHYSIO rotation.
 
-    physio_start_index:       Ensures the paper rotation continues correctly.
-    physio_topics_df:         DataFrame from load_physio_topics — article title source.
-    already_picked_physio_nrs: Mutable set of nr values already assigned in this
-                               scheduling run (across months). Updated in-place so
-                               the pipeline can thread it through multiple months,
-                               guaranteeing each PHYSIO slot gets a different topic.
+    PHYSIO hat KEIN Themen-Sheet und keine Paper-Rotation mehr. Der Titel ist
+    immer "Physio Talk"; das Thema waehlt die eingeteilte Person selbst bzw.
+    wird direkt mit der Planung abgesprochen.
+
     override_date_map:        dict {normalized_date -> event_type} for ALL Tuesday
                                overrides. Used to catch cases where the override's
                                event_type differs from what the algorithm would generate
@@ -43,11 +38,8 @@ def build_tuesday_schedule(calendar_df, physio_df, pep_df, selector,
         pos even 2,4…:  PEER        — AA
         pos odd 3,5…:   COD_JUNIOR  — AA
     """
-    events       = []
-    tuesdays     = calendar_df[calendar_df["weekday"] == "Tuesday"]
-    physio_index = physio_start_index
-    if already_picked_physio_nrs is None:
-        already_picked_physio_nrs = set()
+    events   = []
+    tuesdays = calendar_df[calendar_df["weekday"] == "Tuesday"]
     if override_slots is None:
         override_slots = set()
     if override_date_map is None:
@@ -67,18 +59,7 @@ def build_tuesday_schedule(calendar_df, physio_df, pep_df, selector,
         elif is_even_month:
             if pos == 2:
                 subtype = "PHYSIO"
-                next_topic = get_next_physio_topic(
-                    physio_topics_df,
-                    already_picked_nrs=already_picked_physio_nrs,
-                )
-                if next_topic is not None and pd.notna(next_topic.get("artikel", "")):
-                    raw_title = str(next_topic["artikel"]).strip()
-                    topic = f"Physio Talk: {raw_title}" if raw_title else "Physio Talk"
-                    # Mark this nr as used so the next PHYSIO slot picks a different paper
-                    already_picked_physio_nrs.add(next_topic.get("nr"))
-                else:
-                    topic = "Physio Talk"
-                physio_index += 1
+                topic   = "Physio Talk"
             elif pos % 2 == 1:
                 subtype = "PEER"
                 topic   = "Peer-Teaching Session"
