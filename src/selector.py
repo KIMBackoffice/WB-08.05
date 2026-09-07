@@ -12,14 +12,15 @@ from src.utils_names import extract_lastname as _extract_lastname
 # MINIMUM GAP BETWEEN ASSIGNMENTS ("Sperre")
 # Hard filter, gilt fuer alle algorithmischen Events (JC, MI, PEER,
 # COD_JUNIOR, PHYSIO). S-COD ist ausgenommen (siehe pick_s_dienst).
-#   AA + OA/Intermediate (SOA, OA_I, OA_II, SFA_II):  40 Tage
-#   Leitende / Senior    (CA, SCA, LA, SFA_I):        60 Tage
+#   AA                                        30 Tage
+#   OA / Intermediate (SOA, OA_I, OA_II, SFA_II)  40 Tage
+#   Leitende / Senior (CA, SCA, LA, SFA_I)        60 Tage
 # Wenn in einem erlaubten Dienst-Tier niemand die Sperre einhaelt, wird das
 # naechste Tier probiert; ergibt kein Tier einen Kandidaten, bleibt der Slot
 # LEER (none-over-force) — niemand wird innerhalb seiner Sperre eingeteilt.
 # =========================
 MIN_GAP_DAYS_BY_ROLE = {
-    "AA":     40,
+    "AA":     30,
     "SOA":    40,   # INTERMEDIATE
     "OA_I":   40,
     "OA_II":  40,
@@ -327,7 +328,7 @@ class SmartFairSelector:
             return None
 
         # 4. Minimum gap between assignments (role-aware)
-        # Sperre: 40d fuer AA/OA, 60d fuer Leitende (MIN_GAP_DAYS_BY_ROLE).
+        # Sperre: 30d AA, 40d OA/Intermediate, 60d Leitende (MIN_GAP_DAYS_BY_ROLE).
         df_roles = dict(zip(df["name_clean"], df.get("role_code", pd.Series(dtype=str))))
 
         def _gap_days_for(name):
