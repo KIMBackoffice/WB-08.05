@@ -4,10 +4,16 @@ from src.selector import pick_person_fair
 from src.config import (
     INTERMEDIATE_ROLES,
     SPAETDIENST,
-    TAGDIENST_OA,
     TAGDIENST_AA,
-    BUERO_FORSCHUNG_OA
 )
+
+
+# Platzhalter für einen algorithmisch nicht besetzbaren Slot. Wird bewusst in
+# den responsible-String geschrieben (statt weggelassen), damit die POSITION
+# erhalten bleibt: Slot 1 = AA, Slot 2 = OA/Intermediate. Ohne Platzhalter
+# rutscht bei leerem OA-Slot der AA-Name auf Position 2 und wird im Export
+# falsch beschriftet.
+TBD = "TBD"
 
 
 # =========================
@@ -20,18 +26,18 @@ def build_friday_schedule(calendar_df, pep_df, selector, override_slots=None):
 
     RULES:
     - Every Friday
-    - Time: 14:30–15:15
-    - 2 presenters:
-        1. Intermediate (OA / SFA II)
-        2. AA
-    - Duty priority:
-        Intermediate:
-            1. Spätdienst
-            2. Büro / Forschung
-            3. Tagdienst OA
-        AA:
-            1. Spätdienst
-            2. Tagdienst AA
+    - Time: 14:30-15:15
+    - 2 Vortragende:
+        1. AA
+        2. Intermediate (OA / SFA II)
+    - Dienst-Pools:
+        Intermediate:  NUR Spaetdienst.
+            Tagdienst OA und Buero/Forschung (inkl. B) sind NICHT zugelassen -
+            diese Personen sind nicht vor Ort. Findet sich kein Spaetdienst-OA,
+            bleibt der Slot leer (TBD) und wird von der Planung manuell besetzt
+            (ggf. mit anderer Rolle / Funktion).
+        AA:            Spaetdienst, dann Tagdienst AA (inkl. B / Code 100).
+    - Sperre: 40 Tage fuer alle Rollen, siehe selector.MIN_GAP_DAYS_BY_ROLE.
     """
 
     events = []
@@ -57,7 +63,7 @@ def build_friday_schedule(calendar_df, pep_df, selector, override_slots=None):
             continue
 
         # -------------------------
-        # INTERMEDIATE (OA / SFA II)
+        # INTERMEDIATE (OA / SFA II) - NUR Spaetdienst
         # -------------------------
         intermediate = pick_person_fair(
             pep_df,
@@ -65,8 +71,6 @@ def build_friday_schedule(calendar_df, pep_df, selector, override_slots=None):
             roles=INTERMEDIATE_ROLES,
             duty_priority=[
                 SPAETDIENST,
-                BUERO_FORSCHUNG_OA,
-                TAGDIENST_OA
             ],
             selector=selector
         )
@@ -86,11 +90,12 @@ def build_friday_schedule(calendar_df, pep_df, selector, override_slots=None):
         )
 
         # -------------------------
-        # COMBINE RESPONSIBLE
+        # COMBINE RESPONSIBLE - Reihenfolge AA / OA, Position bleibt stabil
         # -------------------------
-        responsible = " / ".join(
-            [x for x in [aa, intermediate] if x]  # request for word/plan aa/oa, change in zuweisugung insted
-        ) or None
+        if aa is None and intermediate is None:
+            responsible = None
+        else:
+            responsible = " / ".join([aa or TBD, intermediate or TBD])
 
         # -------------------------
         # APPEND EVENT
