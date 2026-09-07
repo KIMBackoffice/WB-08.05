@@ -143,11 +143,6 @@ def load_trauma_board(url):
     return df
 
 
-def load_physio(url):
-    df = load_sheet(url)
-    return df
-
-
 # =========================
 # PEP
 # =========================
@@ -1059,115 +1054,13 @@ def save_finalization(year, month, admin_note=""):
 
 
 # =========================
-# PHYSIO TOPICS
-# Loads the Physio_Talk_Themen_Planung sheet.
-# Columns expected: "Nr.", "Artikel", "Last Presented" (dd.mm.yyyy or empty)
+# PHYSIO TOPICS — ENTFERNT
+# Der Physio Talk hat kein Themen-Sheet mehr: kein load_physio_topics(),
+# kein get_next_physio_topic(), kein save_physio_topic_date(), und auch
+# kein load_physio() (PHYSIO_URL wurde nirgends gelesen). Titel ist fix
+# "Physio Talk", das Thema waehlt die Person bzw. die Planung direkt.
+# Die Secrets PHYSIO_URL und PHYSIO_TOPICS_URL koennen geloescht werden.
 # =========================
-
-def load_physio_topics(url):
-    """
-    Load the Physio Talk topic list.
-    Returns a DataFrame with columns: row_index, nr, artikel, last_presented (datetime or NaT).
-    row_index is the 1-based sheet row (header=1, data starts at 2).
-    """
-    df = load_sheet(url)
-    # Normalise header names (sheet may use any capitalisation)
-    df.columns = [str(c).strip() for c in df.columns]
-
-    # Accept common column name variants
-    col_map = {}
-    for c in df.columns:
-        lc = c.lower()
-        if lc in ("nr.", "nr", "number"):
-            col_map[c] = "nr"
-        elif lc in ("artikel", "article", "topic", "title", "thema"):
-            col_map[c] = "artikel"
-        elif "presented" in lc or "last" in lc or "datum" in lc or "date" in lc:
-            col_map[c] = "last_presented_raw"
-    df = df.rename(columns=col_map)
-
-    # Ensure required columns exist even if sheet is empty
-    for col in ("nr", "artikel", "last_presented_raw"):
-        if col not in df.columns:
-            df[col] = ""
-
-    # Parse date (supports dd.mm.yyyy and yyyy-mm-dd)
-    df["last_presented"] = pd.to_datetime(
-        df["last_presented_raw"], dayfirst=True, errors="coerce"
-    )
-
-    # row_index: sheet row number (header is row 1, first data row is 2)
-    df = df.reset_index(drop=True)
-    df["row_index"] = df.index + 2  # 0-based index → 1-based row, +1 for header
-
-    # Drop completely empty rows
-    df = df[df["artikel"].str.strip().astype(bool)].reset_index(drop=True)
-
-    return df[["row_index", "nr", "artikel", "last_presented"]]
-
-
-def get_next_physio_topic(df, already_picked_nrs=None):
-    """
-    Return the row (Series) of the topic that should be presented next:
-    - Topics never presented (NaT) come first.
-    - Among presented topics, the least recently presented comes first.
-    - already_picked_nrs: set of "nr" values already assigned in this
-      scheduling run — used to guarantee different topics across months.
-    Returns None if df is None or empty.
-    """
-    if df is None or df.empty:
-        return None
-
-    df_sorted = df.copy()
-    df_sorted["_sort_key"] = df_sorted["last_presented"].apply(
-        lambda d: pd.Timestamp.min if pd.isna(d) else d
-    )
-    df_sorted = df_sorted.sort_values("_sort_key").reset_index(drop=True)
-
-    # Skip topics already picked in this scheduling run
-    if already_picked_nrs:
-        remaining = df_sorted[~df_sorted["nr"].isin(already_picked_nrs)]
-        if not remaining.empty:
-            df_sorted = remaining.reset_index(drop=True)
-        # If all topics are exhausted (full cycle), wrap around — use original order
-
-    return df_sorted.iloc[0]
-
-
-def save_physio_topic_date(url, row_index: int, date):
-    """
-    Write `date` (datetime-like or date string) to the 'Last Presented' column
-    of the given sheet row (1-based, where row 1 is the header).
-
-    Assumes 'Last Presented' is in column C (column index 3).
-    """
-    try:
-        client = get_gspread_client()
-        time.sleep(_CALL_DELAY)
-        sh = client.open_by_url(url)
-        ws = sh.get_worksheet(0)
-
-        # Format date as dd.mm.yyyy to match existing sheet style
-        if hasattr(date, "strftime"):
-            date_str = date.strftime("%d.%m.%Y")
-        else:
-            date_str = pd.Timestamp(date).strftime("%d.%m.%Y")
-
-        # Determine which column holds 'Last Presented'
-        header = ws.row_values(1)
-        col_idx = None
-        for i, h in enumerate(header, start=1):
-            if "presented" in h.lower() or "last" in h.lower() or "datum" in h.lower():
-                col_idx = i
-                break
-        if col_idx is None:
-            col_idx = 3  # default: column C
-
-        ws.update_cell(row_index, col_idx, date_str)
-
-    except Exception as e:
-        print(f"[save_physio_topic_date] Could not write row {row_index}: {e}")
-        raise
 
 
 # =========================
