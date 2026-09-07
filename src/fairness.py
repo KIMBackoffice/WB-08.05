@@ -6,7 +6,17 @@ import pandas as pd
 import re
 
 from src.utils_names import extract_lastname as _extract_lastname
-from src.config import EXCLUDED_FROM_ASSIGNMENT, EARLIEST_ASSIGNMENT
+from src.config import (
+    EXCLUDED_FROM_ASSIGNMENT,
+    EARLIEST_ASSIGNMENT,
+    SPAETDIENST,
+    TAGDIENST_AA,
+    TAGDIENST_OA,
+    BUERO_FORSCHUNG_OA,
+    INTERMEDIATE_ROLES,
+    SENIOR_ROLES,
+    S_DIENST,
+)
 
 
 # -------------------------
@@ -258,14 +268,17 @@ def compute_fairness_from_schedule(schedule_all, history_df=None, pep_df=None):
 # DUTY PRIORITY RULES PER EVENT TYPE
 # -------------------------
 
-_SPAETDIENST        = {102, 271, 166}
-_TAGDIENST_AA       = {1072, 113, 719, 721}
-_TAGDIENST_OA       = {101, 119, 165}
-_BUERO_FORSCHUNG_OA = {117, 705}
-_INTERMEDIATE_ROLES = {"SOA", "OA_I", "OA_II", "SFA_II"}
+# Single source of truth: alle Dienst-Pools kommen aus src/config.py.
+# Frueher waren die Codes hier hart kopiert und drifteten auseinander
+# (z.B. fehlten 741/100 bei AA). Nie wieder duplizieren.
+_SPAETDIENST        = SPAETDIENST
+_TAGDIENST_AA       = TAGDIENST_AA
+_TAGDIENST_OA       = TAGDIENST_OA
+_BUERO_FORSCHUNG_OA = BUERO_FORSCHUNG_OA
+_INTERMEDIATE_ROLES = INTERMEDIATE_ROLES
 _AA_ROLES           = {"AA"}
-_SENIOR_ROLES       = {"CA", "SCA", "LA", "SFA_I"}
-_S_DIENST           = {823}
+_SENIOR_ROLES       = SENIOR_ROLES
+_S_DIENST           = S_DIENST
 
 EVENT_DUTY_RULES = {
     "COD_SENIOR": [
@@ -283,8 +296,9 @@ EVENT_DUTY_RULES = {
     "Mittwoch_Curriculum": [
         (_INTERMEDIATE_ROLES, [_SPAETDIENST, _BUERO_FORSCHUNG_OA, _TAGDIENST_OA]),
     ],
+    # JC: OA/Intermediate NUR Spaetdienst (kein Tagdienst OA, kein Buero/B).
     "Journal_Club": [
-        (_INTERMEDIATE_ROLES, [_SPAETDIENST, _BUERO_FORSCHUNG_OA, _TAGDIENST_OA]),
+        (_INTERMEDIATE_ROLES, [_SPAETDIENST]),
         (_AA_ROLES,           [_SPAETDIENST, _TAGDIENST_AA]),
     ],
 }
