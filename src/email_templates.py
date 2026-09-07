@@ -179,26 +179,13 @@ def template_physio(person, person_rows, month_label, firstname=None, **_):
     subject = f"Physio-Talk {month_label} – Einteilung"
     lines   = _assignment_lines(person_rows)
 
-    article_lines = []
-    for _, r in person_rows.iterrows():
-        raw = str(r.get("topic", "") or "").strip()
-        if raw.startswith("Physio Talk: "):
-            article_lines.append(raw[len("Physio Talk: "):].strip())
-        elif raw.lower() not in ("physiologie talk", "physio talk", ""):
-            article_lines.append(raw)
-    article_hint = article_lines[0] if article_lines else ""
-
-    if article_hint:
-        topic_block = (
-            f"Das zugeteilte Paper lautet:\n"
-            f"  «{article_hint}»\n\n"
-            f"Das Paper findest du hier: https://drive.google.com/drive/u/1/folders/1MGDTHKP92KTLE8rrLP-8ESJ-PtFw7h7V"
-        )
-    else:
-        topic_block = (
-            f"Falls du kein Thema hast, kannst du hier in unserer Paper-Sammlung schauen:\n"
-            f"  https://drive.google.com/drive/u/1/folders/1MGDTHKP92KTLE8rrLP-8ESJ-PtFw7h7V"
-        )
+    # Kein Themen-Sheet mehr: das Thema waehlt die Person selbst bzw. wird
+    # direkt mit der Planung abgesprochen. Deshalb immer der Link auf die
+    # Paper-Sammlung, nie ein fix zugeteiltes Paper.
+    topic_block = (
+        "Falls du kein Thema hast, kannst du hier in unserer Paper-Sammlung schauen:\n"
+        "  https://drive.google.com/drive/u/1/folders/1MGDTHKP92KTLE8rrLP-8ESJ-PtFw7h7V"
+    )
 
     body = f"""Liebe/r {firstname}
 
