@@ -39,7 +39,8 @@ def prepare_history(df):
 # was assigned "too recently" and should be flagged as a validation issue.
 #
 # SPERR-REGELN (identisch mit selector.MIN_GAP_DAYS_BY_ROLE, in TAGEN):
-#   AA + INTERMEDIATE (SOA/OA_I/OA_II/SFA_II)  → Meldung bei Abstand < 40 Tage
+#   AA                                         → Meldung bei Abstand < 30 Tage
+#   INTERMEDIATE (SOA/OA_I/OA_II/SFA_II)       → Meldung bei Abstand < 40 Tage
 #   LEITENDE / SENIOR (CA/SCA/LA/SFA_I)        → Meldung bei Abstand < 60 Tage
 #   Rolle unbekannt                            → Fallback 40 Tage
 # Gerechnet wird taggenau gegen die letzte Zuweisung VOR dem Eventdatum,
@@ -75,7 +76,7 @@ def check_recent_assignments(current, history, pep_df=None):
 
     Taggenau: fuer jede geplante Zuweisung wird die letzte historische
     Zuweisung VOR dem Eventdatum gesucht und der Abstand in Tagen gegen
-    MIN_GAP_DAYS_BY_ROLE geprueft (AA/OA 40 Tage, Leitende 60 Tage).
+    MIN_GAP_DAYS_BY_ROLE geprueft (AA 30, OA 40, Leitende 60 Tage).
     """
 
     if history is None or history.empty:
