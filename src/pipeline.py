@@ -301,7 +301,7 @@ def generate_full_schedule(year, month, data):
     )
 
     therapy   = ensure_schema(schedule_therapy(calendar))
-    tuesday   = ensure_schema(build_tuesday_schedule(calendar, get_df("physio"), pep_df, selector, physio_topics_df=get_df("physio_topics"), already_picked_physio_nrs=set()))
+    tuesday   = ensure_schema(build_tuesday_schedule(calendar, pep_df, selector))
     wednesday = ensure_schema(build_wednesday_schedule(calendar, pep_df, get_df("mittwoch_topics"), selector))
     friday    = ensure_schema(build_friday_schedule(calendar, pep_df, selector))
 
@@ -503,8 +503,6 @@ def generate_full_schedule_aware(year, month, data):
     sheet_events = _build_sheet_events(data)
 
     target_schedule = None
-    # Shared set — ensures each PHYSIO slot across months picks a different paper
-    _physio_picked: set = set()
     # Shared topic map — same idea for Mittwochscurriculum. Built ONCE here so
     # the per-topic rotation survives the month loop below; rebuilding it per
     # month discarded the rotation and let the same person present the same
@@ -528,7 +526,7 @@ def generate_full_schedule_aware(year, month, data):
         therapy = ensure_schema(schedule_therapy(calendar))
 
         # Algorithm events — shared selector carries memory month-to-month
-        tuesday   = ensure_schema(build_tuesday_schedule(calendar, get_df("physio"), pep_df_raw, selector, physio_topics_df=get_df("physio_topics"), already_picked_physio_nrs=_physio_picked, override_slots=_override_slots, override_date_map=_override_date_map))
+        tuesday   = ensure_schema(build_tuesday_schedule(calendar, pep_df_raw, selector, override_slots=_override_slots, override_date_map=_override_date_map))
         wednesday = ensure_schema(build_wednesday_schedule(calendar, pep_df_raw, get_df("mittwoch_topics"), selector, override_slots=_override_slots, topic_map=_mittwoch_topics))
         friday    = ensure_schema(build_friday_schedule(calendar, pep_df_raw, selector, override_slots=_override_slots))
 
@@ -561,14 +559,15 @@ def generate_full_schedule_aware(year, month, data):
 
     return target_schedule if target_schedule is not None else pd.DataFrame()
 
-def build_placeholder_schedule(calendar, physio_df):
+def build_placeholder_schedule(calendar):
     """
     Build algorithm-slot events with NO responsible person assigned.
     Used for months without PEP data — slots appear in the calendar so
     planners can see what needs to be filled, but responsible is blank.
 
     Mirrors the exact slot logic from tuesday.py, wednesday.py, friday.py:
-      Tuesday:    COD_SENIOR (pos=1) / PHYSIO (even month pos=2) /
+      Tuesday:    COD_SENIOR (pos=1) / PHYSIO (even month pos=2, Titel fix
+                  "Physio Talk") /
                   PEER / COD_JUNIOR (rotation)
       Wednesday:  Mittwoch_Curriculum (every Wednesday, topic from sheet)
       Friday:     Journal_Club (intermediate slot + AA slot shown as one row)
@@ -579,7 +578,6 @@ def build_placeholder_schedule(calendar, physio_df):
     # TUESDAY — same logic as tuesday.py, no assignment
     # -------------------------
     tuesdays = calendar[calendar["weekday"] == "Tuesday"]
-    physio_index = 0
 
     for _, row in tuesdays.iterrows():
         d = row["date"]
@@ -593,11 +591,7 @@ def build_placeholder_schedule(calendar, physio_df):
         elif is_even_month:
             if pos == 2:
                 subtype = "PHYSIO"
-                if physio_df is not None and not physio_df.empty:
-                    topic = "Physio Teaching"  # article title used only in emails, not displayed
-                else:
-                    topic = "Physio Teaching"
-                physio_index += 1
+                topic   = "Physio Talk"
             elif pos % 2 == 1:
                 subtype = "PEER"
                 topic   = "Peer-Teaching Session"
@@ -670,7 +664,7 @@ def generate_sheet_only_schedule(year, month, data):
 
     calendar = add_weekday_position(generate_calendar(year, month))
     therapy  = ensure_schema(schedule_therapy(calendar))
-    placeholders = ensure_schema(build_placeholder_schedule(calendar, get_df("physio")))
+    placeholders = ensure_schema(build_placeholder_schedule(calendar))
 
     full = pd.concat(
         _build_sheet_events(data) + [therapy, placeholders],
