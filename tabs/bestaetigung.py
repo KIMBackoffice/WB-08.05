@@ -18,7 +18,7 @@ from src.fairness  import (
     _find_alternatives_ordered,
 )
 from src.pipeline    import generate_full_schedule_aware, generate_sheet_only_schedule
-from src.data_loader import load_confirmations, save_confirmation, save_finalization, save_history_rows, save_physio_topic_date, apply_overrides, load_overrides
+from src.data_loader import load_confirmations, save_confirmation, save_finalization, save_history_rows, apply_overrides, load_overrides
 
 
 REVIEWERS      = {"A": "Ärzteschaft Bildungsverantwortung", "B": "Pflege Bildungsverantwortliche", "D": "Pflege Fachentwicklungsverantwortliche", "C": "Administration"}
@@ -693,41 +693,11 @@ def _render_finalization(sc, confirm_month, all_confirmed):
                     except Exception as he:
                         st.session_state[f"_fin_warn_{confirm_month}"] = str(he)
 
-                # Write last_presented dates back to Physio Topics sheet
-                physio_topics_url = st.secrets.get("PHYSIO_TOPICS_URL", "")
-                physio_topics_df  = st.session_state.get("data", {}).get("physio_topics")
-                physio_updated    = 0
-                physio_warn       = None
-                if physio_topics_url and physio_topics_df is not None and not physio_topics_df.empty:
-                    physio_rows = sc[sc["event_type"] == "PHYSIO"].copy()
-                    for _, pr in physio_rows.iterrows():
-                        raw_topic = str(pr.get("topic", "") or "")
-                        bare = raw_topic[len("Physio Talk: "):] if raw_topic.startswith("Physio Talk: ") else raw_topic
-                        if not bare:
-                            continue
-                        match = physio_topics_df[
-                            physio_topics_df["artikel"].astype(str).str.strip() == bare.strip()
-                        ]
-                        if match.empty:
-                            continue
-                        row_index = int(match.iloc[0]["row_index"])
-                        event_date = pd.Timestamp(pr["date"])
-                        try:
-                            save_physio_topic_date(physio_topics_url, row_index, event_date)
-                            physio_updated += 1
-                        except Exception as pe:
-                            physio_warn = str(pe)
-                            break
-
             # spinner exits here
             if pushed:
                 banner(f"{MONTH_LABELS[confirm_month]} finalisiert ✓ — {len(history_rows)} Einträge ins Historical Sheet übertragen.", "ok")
             else:
                 banner(f"{MONTH_LABELS[confirm_month]} finalisiert!", "ok")
-            if physio_updated:
-                banner(f"{physio_updated} Physio-Talk-Datum/Daten ins Physio-Topics-Sheet geschrieben ✓", "ok")
-            if physio_warn:
-                banner(f"Physio-Topics-Sheet konnte nicht vollständig aktualisiert werden: {physio_warn}", "warn")
             if f"_fin_warn_{confirm_month}" in st.session_state:
                 banner(f"Historische Zuweisung konnte nicht gespeichert werden: {st.session_state[f'_fin_warn_{confirm_month}']}", "warn")
 
