@@ -2158,9 +2158,6 @@ _SHEET_CHECKS = [
     # PEP — clean roster export, entirely different schema
     ("pep",               "PEP (Dienstplan)",                 "PEP_URL",
         ["name_clean", "first_name", "last_name", "role_code", "date", "duty_code", "datefixed"]),
-    # Physio talk topics — minimal schema, no date column
-    ("physio_topics",     "Physio Talk Themen",               "PHYSIO_TOPICS_URL",
-        ["nr.", "artikel"]),
 ]
 
 
