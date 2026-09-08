@@ -16,7 +16,6 @@ Layout per event:
 
   Thema:
     - COD_SENIOR, COD_JUNIOR, PEER    → "n/a – <label>" greyed read-only
-    - PHYSIO                          → article dropdown (n+1 rotation, dedup within month)
     - Mittwoch_Curriculum             → person-scoped topic selectbox
 
   Manual overrides link is shown at the top for direct sheet editing.
@@ -48,12 +47,13 @@ _JC_EVENT = "Journal_Club"
 
 _FIXED_TYPE_EVENTS  = {"COD_SENIOR", "Mittwoch_Curriculum"}
 _SWITCHABLE_TYPES   = ["COD_JUNIOR", "PEER", "PHYSIO"]
-_FIXED_TOPIC_EVENTS = {"COD_SENIOR", "COD_JUNIOR", "PEER"}
+_FIXED_TOPIC_EVENTS = {"COD_SENIOR", "COD_JUNIOR", "PEER", "PHYSIO"}
 
 _FIXED_TOPIC_LABEL: dict[str, str] = {
     "COD_SENIOR": "n/a – Case of the Day (COD)",
     "COD_JUNIOR": "n/a – Case of the Day (COD)",
     "PEER":       "n/a – Peer-Teaching Session",
+    "PHYSIO":     "n/a – Physio Talk",
 }
 
 _EVT_LABEL: dict[str, str] = {
@@ -421,9 +421,6 @@ def render():
         f"<a href='https://docs.google.com/spreadsheets/d/1c6Mrpr8vF82FJ2ADhLRKd_7mRm4C6fV3GSRm0Cu3Pag/edit' "
         f"target='_blank' style='color:var(--teal)'>Mittwochscurriculum ↗</a>"
         f"&nbsp;·&nbsp;"
-        f"<a href='https://docs.google.com/spreadsheets/d/1BGFhC6YaW8mvXd-CL2Yl2apeLC-IATEbQ4ZGywteebI/edit?gid=0#gid=0' "
-        f"target='_blank' style='color:var(--teal)'>Physio-Talk ↗</a>"
-        f"&nbsp;·&nbsp;"
         f"<span style='color:#aaa;font-size:11px'>Sheet-basierte Events (Teaching Tuesday, TTE usw.) bitte direkt im Google Sheet anpassen.</span>"
         f"</div>"
         f"<div style='margin-top:6px;padding-top:6px;border-top:1px solid #eaecef;font-size:11.5px;color:#888'>"
@@ -550,8 +547,6 @@ def render():
     # Can't use `or` with DataFrames (raises ValueError) — check explicitly
     _mt = _data_d.get("mittwoch_topics")
     mittwoch_df = _mt if (_mt is not None and not getattr(_mt, "empty", True)) else _data_d.get("mittwoch")
-    physio_topics_df = st.session_state.get("data", {}).get("physio_topics")
-    physio_used:set  = set()   # tracks claimed articles within this render pass
 
     for idx, row in sc_rel.iterrows():
         if _safe_str(row.get("event_type")) == _JC_EVENT:
@@ -565,7 +560,7 @@ def render():
             _stable   = f"{_date_tag}_{_evt_tag}"
             _render_row_standard(
                 _stable, row, month, edits, pep_norm,
-                mittwoch_df, physio_topics_df, physio_used,
+                mittwoch_df,
             )
 
     # ── Override save box ─────────────────────────────────────────────────
@@ -753,7 +748,7 @@ def _render_row_jc(idx, row, month, edits, pep_norm):
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _render_row_standard(idx, row, month, edits, pep_norm,
-                         mittwoch_df, physio_topics_df, physio_used: set):
+                         mittwoch_df):
     orig_resp  = _safe_str(row.get("responsible"), "— TBD —")
     orig_topic = _safe_str(row.get("topic"))
     orig_type  = _safe_str(row.get("event_type"))
@@ -812,7 +807,7 @@ def _render_row_standard(idx, row, month, edits, pep_norm,
     resolved_topic = _render_thema(
         idx, month,
         orig_topic, cur_topic, cur_resp, cur_type,
-        mittwoch_df, physio_topics_df, physio_used,
+        mittwoch_df,
     )
 
     staged = edits.setdefault(idx, {})
@@ -911,7 +906,7 @@ def _render_type_selector(idx, month, orig_type: str, cur_type: str, edits: dict
 
 def _render_thema(idx, month,
                   orig_topic, cur_topic, cur_resp, cur_type,
-                  mittwoch_df, physio_topics_df, physio_used: set) -> str:
+                  mittwoch_df) -> str:
     if cur_type in _FIXED_TOPIC_EVENTS:
         label = _FIXED_TOPIC_LABEL.get(cur_type, "n/a")
         st.markdown(
@@ -921,9 +916,6 @@ def _render_thema(idx, month,
             unsafe_allow_html=True,
         )
         return orig_topic
-
-    if cur_type == "PHYSIO":
-        return _render_physio_topic(idx, month, physio_topics_df, orig_topic, cur_topic, physio_used)
 
     if cur_type == "Mittwoch_Curriculum":
         return _render_mittwoch_topic(idx, month, mittwoch_df, cur_topic, cur_resp, orig_topic)
@@ -936,71 +928,6 @@ def _render_thema(idx, month,
         unsafe_allow_html=True,
     )
     return display
-
-
-def _render_physio_topic(idx, month, physio_topics_df, orig_topic, cur_topic,
-                         physio_used: set) -> str:
-    """
-    Article dropdown, sorted NaT-first then oldest-first.
-    physio_used ensures n, n+1, n+2 … defaults when multiple PHYSIO slots
-    exist in the same month.
-    Stored as "Physio Talk: <article>".
-    """
-    import pandas as _pd
-
-    sel_key = f"zuw_{month}_{idx}_physio_sel"
-
-    def _bare(t: str) -> str:
-        if t and t.startswith("Physio Talk: "):
-            return t[len("Physio Talk: "):]
-        return "" if (not t or t == "Physio Talk") else t
-
-    bare_cur  = _bare(cur_topic)
-    bare_orig = _bare(orig_topic)
-
-    topics = []
-    if physio_topics_df is not None and not physio_topics_df.empty:
-        df = physio_topics_df.copy()
-        df["_sort"] = df["last_presented"].apply(
-            lambda d: _pd.Timestamp.min if _pd.isna(d) else d
-        )
-        df = df.sort_values("_sort").reset_index(drop=True)
-        topics = [str(r["artikel"]).strip() for _, r in df.iterrows()
-                  if str(r["artikel"]).strip()]
-
-    if not topics:
-        display = cur_topic or orig_topic or "Physiologie Talk"
-        st.markdown(
-            f"<div style='padding:8px 12px;background:#f7f8fa;border-radius:8px;"
-            f"font-size:13px;color:#aaa;border:1px solid #e2e6ea;font-style:italic'>"
-            f"{display}</div>",
-            unsafe_allow_html=True,
-        )
-        return display
-
-    # Priority: staged article → saved original → first unused in sorted list
-    if bare_cur and bare_cur in topics:
-        default_idx = topics.index(bare_cur)
-    elif bare_orig and bare_orig in topics:
-        default_idx = topics.index(bare_orig)
-    else:
-        fallback    = next((t for t in topics if t not in physio_used), topics[0])
-        default_idx = topics.index(fallback)
-
-    if sel_key not in st.session_state:
-        st.session_state[sel_key] = topics[default_idx]
-    if st.session_state[sel_key] not in topics:
-        st.session_state[sel_key] = topics[default_idx]
-
-    st.selectbox(
-        "Thema", topics,
-        index=topics.index(st.session_state[sel_key]),
-        label_visibility="collapsed",
-        key=sel_key,
-    )
-    chosen = st.session_state[sel_key]
-    physio_used.add(chosen)
-    return f"Physio Talk: {chosen}" if chosen else "Physio Talk"
 
 
 def _render_mittwoch_topic(idx, month, mittwoch_df, cur_topic, cur_resp, orig_topic) -> str:
